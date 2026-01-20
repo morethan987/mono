@@ -153,6 +153,8 @@ COMMANDS:
     today       查看今日日程
     complete    标记任务完成
     postpone    推迟任务
+    delete      删除任务
+    update      更新任务
     feedback    提交详细反馈
     replan      重新规划日程
     config      配置管理
@@ -162,6 +164,8 @@ EXAMPLES:
     mono add "完成项目报告" -p high -d tomorrow
     mono now                    当前该做什么？
     mono complete abc123        标记完成
+    mono delete abc123          删除任务
+    mono update abc123 -p urgent -t "工作,紧急"  更新任务
     mono feedback abc123        提交详细反馈
 核心交互流程
 用户启动 mono → daemon 在后台运行
@@ -396,10 +400,13 @@ Phase 1-3 完成后即可使用：
 1. ✅ mono daemon start/stop - 守护进程管理
 2. ✅ mono add - 添加任务
 3. ✅ mono list / mono today - 查看任务
-4. ✅ mono now - 当前该做什么
-5. ✅ 交互式通知 (开始/推迟/跳过)
-6. ✅ 基于优先级 + 截止日期的简单调度
+4. ✅ mono now - 当前该做什么 (使用调度引擎)
+5. ✅ mono delete - 删除任务
+6. ✅ mono update - 更新任务
+7. ⬜ 交互式通知 (开始/推迟/跳过) - Phase 3
+8. ✅ 基于优先级 + 截止日期的简单调度
+9. ✅ mono replan - 重新规划任务优先级
 Phase 4-5 完成后具备智能：
-7. ✅ 任务类型级学习
-8. ✅ 自适应时间槽推荐
-9. ✅ 详细反馈收集 (mono feedback)
+10. ⬜ 任务类型级学习
+11. ⬜ 自适应时间槽推荐
+12. ⬜ 详细反馈收集 (mono feedback)
