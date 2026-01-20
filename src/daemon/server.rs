@@ -8,7 +8,7 @@ use tracing::{debug, error, info, warn};
 use crate::daemon::DaemonState;
 use crate::error::{MonoError, Result};
 use crate::models::{Priority, Task, TaskStatus};
-use crate::protocol::{decode_request, encode_response, Request, Response};
+use crate::protocol::{Request, Response, decode_request, encode_response};
 use crate::storage::TaskRepository;
 
 pub struct DaemonServer {
@@ -26,14 +26,11 @@ impl DaemonServer {
         let socket_path = &self.state.paths.socket;
 
         if socket_path.exists() {
-            std::fs::remove_file(socket_path).map_err(|e| {
-                MonoError::Platform(format!("Failed to remove old socket: {}", e))
-            })?;
+            std::fs::remove_file(socket_path)
+                .map_err(|e| MonoError::Platform(format!("Failed to remove old socket: {}", e)))?;
         }
 
-        let listener = UnixListener::bind(socket_path).map_err(|e| {
-            MonoError::IpcConnection(e)
-        })?;
+        let listener = UnixListener::bind(socket_path).map_err(|e| MonoError::IpcConnection(e))?;
 
         info!("Daemon server listening on {:?}", socket_path);
 
@@ -155,37 +152,29 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
             }
         }
 
-        Request::GetTask { id } => {
-            match state.storage.get_by_short_id(&id).await {
-                Ok(Some(task)) => Response::task(task),
-                Ok(None) => Response::error(format!("Task not found: {}", id)),
-                Err(e) => Response::error(format!("Database error: {}", e)),
-            }
-        }
+        Request::GetTask { id } => match state.storage.get_by_short_id(&id).await {
+            Ok(Some(task)) => Response::task(task),
+            Ok(None) => Response::error(format!("Task not found: {}", id)),
+            Err(e) => Response::error(format!("Database error: {}", e)),
+        },
 
-        Request::ListTasks { status, limit } => {
-            match state.storage.list(status, limit).await {
-                Ok(tasks) => Response::task_list(tasks),
-                Err(e) => Response::error(format!("Failed to list tasks: {}", e)),
-            }
-        }
+        Request::ListTasks { status, limit } => match state.storage.list(status, limit).await {
+            Ok(tasks) => Response::task_list(tasks),
+            Err(e) => Response::error(format!("Failed to list tasks: {}", e)),
+        },
 
-        Request::ListToday => {
-            match state.storage.list_today().await {
-                Ok(tasks) => Response::task_list(tasks),
-                Err(e) => Response::error(format!("Failed to list today's tasks: {}", e)),
-            }
-        }
+        Request::ListToday => match state.storage.list_today().await {
+            Ok(tasks) => Response::task_list(tasks),
+            Err(e) => Response::error(format!("Failed to list today's tasks: {}", e)),
+        },
 
-        Request::GetCurrentTask => {
-            match state.storage.list_pending().await {
-                Ok(tasks) => {
-                    let current = state.scheduler.get_next_task(tasks).map(|st| st.task);
-                    Response::CurrentTask { task: current }
-                }
-                Err(e) => Response::error(format!("Failed to get current task: {}", e)),
+        Request::GetCurrentTask => match state.storage.list_pending().await {
+            Ok(tasks) => {
+                let current = state.scheduler.get_next_task(tasks).map(|st| st.task);
+                Response::CurrentTask { task: current }
             }
-        }
+            Err(e) => Response::error(format!("Failed to get current task: {}", e)),
+        },
 
         Request::UpdateTaskStatus { id, status } => {
             match state.storage.get_by_short_id(&id).await {
@@ -222,36 +211,30 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
             }
         }
 
-        Request::PostponeTask { id, minutes } => {
-            match state.storage.get_by_short_id(&id).await {
-                Ok(Some(mut task)) => {
-                    task.status = TaskStatus::Postponed;
-                    if let Some(scheduled) = task.scheduled_at {
-                        task.scheduled_at = Some(scheduled + chrono::Duration::minutes(minutes as i64));
-                    }
-                    task.updated_at = Utc::now();
-                    match state.storage.update(&task).await {
-                        Ok(()) => Response::task(task),
-                        Err(e) => Response::error(format!("Failed to postpone task: {}", e)),
-                    }
+        Request::PostponeTask { id, minutes } => match state.storage.get_by_short_id(&id).await {
+            Ok(Some(mut task)) => {
+                task.status = TaskStatus::Postponed;
+                if let Some(scheduled) = task.scheduled_at {
+                    task.scheduled_at = Some(scheduled + chrono::Duration::minutes(minutes as i64));
                 }
-                Ok(None) => Response::error(format!("Task not found: {}", id)),
-                Err(e) => Response::error(format!("Database error: {}", e)),
+                task.updated_at = Utc::now();
+                match state.storage.update(&task).await {
+                    Ok(()) => Response::task(task),
+                    Err(e) => Response::error(format!("Failed to postpone task: {}", e)),
+                }
             }
-        }
+            Ok(None) => Response::error(format!("Task not found: {}", id)),
+            Err(e) => Response::error(format!("Database error: {}", e)),
+        },
 
-        Request::DeleteTask { id } => {
-            match state.storage.get_by_short_id(&id).await {
-                Ok(Some(task)) => {
-                    match state.storage.delete(&task.id).await {
-                        Ok(()) => Response::ok(),
-                        Err(e) => Response::error(format!("Failed to delete task: {}", e)),
-                    }
-                }
-                Ok(None) => Response::error(format!("Task not found: {}", id)),
-                Err(e) => Response::error(format!("Database error: {}", e)),
-            }
-        }
+        Request::DeleteTask { id } => match state.storage.get_by_short_id(&id).await {
+            Ok(Some(task)) => match state.storage.delete(&task.id).await {
+                Ok(()) => Response::ok(),
+                Err(e) => Response::error(format!("Failed to delete task: {}", e)),
+            },
+            Ok(None) => Response::error(format!("Task not found: {}", id)),
+            Err(e) => Response::error(format!("Database error: {}", e)),
+        },
 
         Request::UpdateTask {
             id,
@@ -261,41 +244,42 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
             tags,
             estimated_minutes,
             deadline,
-        } => {
-            match state.storage.get_by_short_id(&id).await {
-                Ok(Some(mut task)) => {
-                    if let Some(t) = title {
-                        task.title = t;
-                    }
-                    if description.is_some() {
-                        task.description = description;
-                    }
-                    if let Some(p) = priority {
-                        task.priority = p;
-                    }
-                    if let Some(t) = tags {
-                        task.tags = t;
-                    }
-                    if estimated_minutes.is_some() {
-                        task.estimated_minutes = estimated_minutes;
-                    }
-                    if deadline.is_some() {
-                        task.deadline = deadline;
-                    }
-                    task.updated_at = Utc::now();
-
-                    match state.storage.update(&task).await {
-                        Ok(()) => Response::task(task),
-                        Err(e) => Response::error(format!("Failed to update task: {}", e)),
-                    }
+        } => match state.storage.get_by_short_id(&id).await {
+            Ok(Some(mut task)) => {
+                if let Some(t) = title {
+                    task.title = t;
                 }
-                Ok(None) => Response::error(format!("Task not found: {}", id)),
-                Err(e) => Response::error(format!("Database error: {}", e)),
+                if description.is_some() {
+                    task.description = description;
+                }
+                if let Some(p) = priority {
+                    task.priority = p;
+                }
+                if let Some(t) = tags {
+                    task.tags = t;
+                }
+                if estimated_minutes.is_some() {
+                    task.estimated_minutes = estimated_minutes;
+                }
+                if deadline.is_some() {
+                    task.deadline = deadline;
+                }
+                task.updated_at = Utc::now();
+
+                match state.storage.update(&task).await {
+                    Ok(()) => Response::task(task),
+                    Err(e) => Response::error(format!("Failed to update task: {}", e)),
+                }
             }
-        }
+            Ok(None) => Response::error(format!("Task not found: {}", id)),
+            Err(e) => Response::error(format!("Database error: {}", e)),
+        },
 
         Request::GetDaemonStatus => {
-            let task_count = state.storage.list(None, None).await
+            let task_count = state
+                .storage
+                .list(None, None)
+                .await
                 .map(|t| t.len() as u64)
                 .unwrap_or(0);
 
@@ -308,21 +292,23 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
             }
         }
 
-        Request::Replan => {
-            match state.storage.list_pending().await {
-                Ok(tasks) => {
-                    let ranked = state.scheduler.rank_tasks(tasks, &crate::scheduling::SchedulingContext::new());
-                    let ranked_tasks = ranked
-                        .into_iter()
-                        .map(|st| crate::protocol::RankedTask {
-                            task: st.task,
-                            score: st.score,
-                        })
-                        .collect();
-                    Response::RankedTasks { tasks: ranked_tasks }
+        Request::Replan => match state.storage.list_pending().await {
+            Ok(tasks) => {
+                let ranked = state
+                    .scheduler
+                    .rank_tasks(tasks, &crate::scheduling::SchedulingContext::new());
+                let ranked_tasks = ranked
+                    .into_iter()
+                    .map(|st| crate::protocol::RankedTask {
+                        task: st.task,
+                        score: st.score,
+                    })
+                    .collect();
+                Response::RankedTasks {
+                    tasks: ranked_tasks,
                 }
-                Err(e) => Response::error(format!("Failed to replan: {}", e)),
             }
-        }
+            Err(e) => Response::error(format!("Failed to replan: {}", e)),
+        },
     }
 }

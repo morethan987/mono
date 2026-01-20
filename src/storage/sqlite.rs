@@ -3,9 +3,7 @@ use chrono::{DateTime, Utc};
 use sqlx::{Pool, Row, Sqlite};
 
 use crate::error::{MonoError, Result};
-use crate::models::{
-    Feedback, FeedbackType, Priority, Schedule, ScheduleStatus, Task, TaskStatus,
-};
+use crate::models::{Feedback, FeedbackType, Priority, Schedule, ScheduleStatus, Task, TaskStatus};
 use crate::storage::repository::{FeedbackRepository, ScheduleRepository, TaskRepository};
 
 #[derive(Clone)]
@@ -237,8 +235,12 @@ fn row_to_task(row: &sqlx::sqlite::SqliteRow) -> Task {
         priority: Priority::from_i32(row.get("priority")),
         status: TaskStatus::from_str(row.get("status")),
         tags: parse_tags(row.get("tags")),
-        estimated_minutes: row.get::<Option<i32>, _>("estimated_minutes").map(|m| m as u32),
-        actual_minutes: row.get::<Option<i32>, _>("actual_minutes").map(|m| m as u32),
+        estimated_minutes: row
+            .get::<Option<i32>, _>("estimated_minutes")
+            .map(|m| m as u32),
+        actual_minutes: row
+            .get::<Option<i32>, _>("actual_minutes")
+            .map(|m| m as u32),
         deadline: row
             .get::<Option<String>, _>("deadline")
             .and_then(|s| parse_datetime(&s)),

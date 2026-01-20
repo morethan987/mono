@@ -4,7 +4,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
 use crate::error::{MonoError, Result};
-use crate::protocol::{decode_response, encode_request, Request, Response};
+use crate::protocol::{Request, Response, decode_response, encode_request};
 
 pub struct DaemonClient {
     stream: UnixStream,
@@ -17,9 +17,7 @@ impl DaemonClient {
 
         let stream = tokio::time::timeout(timeout, UnixStream::connect(socket_path))
             .await
-            .map_err(|_| MonoError::IpcTimeout {
-                timeout_secs,
-            })?
+            .map_err(|_| MonoError::IpcTimeout { timeout_secs })?
             .map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound
                     || e.kind() == std::io::ErrorKind::ConnectionRefused
