@@ -126,6 +126,7 @@ sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio", "chrono", "uu
 thiserror = "2.0.18"
 tokio = { version = "1.49.0", features = ["full"] }
 toml = "0.9.11"
+table = "0.4.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 uuid = "1.19.0"
