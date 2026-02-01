@@ -132,13 +132,17 @@ impl NotificationBackend for LinuxNotificationBackend {
             .map_err(|e| notification_error(format!("无法订阅 NotificationClosed 信号: {}", e)))?;
 
         let result = timeout(self.response_timeout, async {
+            let mut action_result: Option<String> = None;
             loop {
                 tokio::select! {
+                    // Prioritize action_stream by placing it first with biased mode
+                    biased;
                     Some(signal) = action_stream.next() => {
                         if let Ok(args) = signal.args() {
                             if args.id == notification_id {
                                 debug!("Action invoked: id={}, action={}", args.id, args.action_key);
-                                return Some(args.action_key.to_string());
+                                action_result = Some(args.action_key.to_string());
+                                // Don't return immediately - wait for NotificationClosed to ensure cleanup
                             }
                         }
                     }
@@ -146,7 +150,8 @@ impl NotificationBackend for LinuxNotificationBackend {
                         if let Ok(args) = signal.args() {
                             if args.id == notification_id {
                                 debug!("Notification closed: id={}, reason={}", args.id, args.reason);
-                                return None;
+                                // If we already received an action, return it; otherwise return None
+                                return action_result;
                             }
                         }
                     }
