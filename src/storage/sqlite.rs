@@ -3,9 +3,7 @@ use chrono::{DateTime, Utc};
 use sqlx::{Pool, Row, Sqlite};
 
 use crate::error::{MonoError, Result};
-use crate::models::{
-    Feedback, FeedbackType, Priority, Schedule, ScheduleStatus, Task, TaskStatus,
-};
+use crate::models::{Feedback, FeedbackType, Priority, Schedule, ScheduleStatus, Task, TaskStatus};
 use crate::storage::repository::{FeedbackRepository, ScheduleRepository, TaskRepository};
 
 #[derive(Clone)]
@@ -180,6 +178,27 @@ impl TaskRepository for SqliteStorage {
         Ok(rows.iter().map(row_to_task).collect())
     }
 
+    async fn list_ready_for_notification(&self) -> Result<Vec<Task>> {
+        let now = format_datetime(&Utc::now());
+        let rows = sqlx::query(
+            r#"
+            SELECT id, title, description, priority, status, tags,
+                   estimated_minutes, actual_minutes, deadline, scheduled_at,
+                   started_at, completed_at, created_at, updated_at
+            FROM tasks
+            WHERE status = 'pending'
+              AND (scheduled_at IS NULL OR scheduled_at <= ?)
+            ORDER BY priority DESC, deadline ASC
+            LIMIT 1
+            "#,
+        )
+        .bind(&now)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(row_to_task).collect())
+    }
+
     async fn update(&self, task: &Task) -> Result<()> {
         let result = sqlx::query(
             r#"
@@ -237,8 +256,12 @@ fn row_to_task(row: &sqlx::sqlite::SqliteRow) -> Task {
         priority: Priority::from_i32(row.get("priority")),
         status: TaskStatus::from_str(row.get("status")),
         tags: parse_tags(row.get("tags")),
-        estimated_minutes: row.get::<Option<i32>, _>("estimated_minutes").map(|m| m as u32),
-        actual_minutes: row.get::<Option<i32>, _>("actual_minutes").map(|m| m as u32),
+        estimated_minutes: row
+            .get::<Option<i32>, _>("estimated_minutes")
+            .map(|m| m as u32),
+        actual_minutes: row
+            .get::<Option<i32>, _>("actual_minutes")
+            .map(|m| m as u32),
         deadline: row
             .get::<Option<String>, _>("deadline")
             .and_then(|s| parse_datetime(&s)),

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::config::{MonoPaths, Settings};
+use crate::notification::LinuxNotificationBackend;
 use crate::scheduling::SchedulingEngine;
 use crate::storage::SqliteStorage;
 
@@ -12,6 +13,7 @@ pub struct DaemonState {
     pub settings: Settings,
     pub started_at: DateTime<Utc>,
     pub scheduler: SchedulingEngine,
+    pub notification_backend: Option<LinuxNotificationBackend>,
     shutdown_requested: Arc<RwLock<bool>>,
 }
 
@@ -23,7 +25,22 @@ impl DaemonState {
             settings,
             started_at: Utc::now(),
             scheduler: SchedulingEngine::with_default_policies(),
+            notification_backend: None,
             shutdown_requested: Arc::new(RwLock::new(false)),
+        }
+    }
+
+    pub async fn init_notification_backend(&mut self) {
+        if self.settings.notification.enabled {
+            match LinuxNotificationBackend::new().await {
+                Ok(backend) => {
+                    tracing::info!("Notification backend initialized");
+                    self.notification_backend = Some(backend);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to initialize notification backend: {}", e);
+                }
+            }
         }
     }
 

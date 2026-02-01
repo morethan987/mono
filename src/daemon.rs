@@ -14,7 +14,7 @@ use tracing::{error, info};
 use crate::config::{MonoPaths, Settings};
 use crate::error::{MonoError, Result};
 use crate::platform::{Platform, UnixPlatform};
-use crate::storage::{create_pool, run_migrations, SqliteStorage};
+use crate::storage::{SqliteStorage, create_pool, run_migrations};
 
 pub async fn run_daemon_foreground(paths: &MonoPaths) -> Result<()> {
     let platform = UnixPlatform::new();
@@ -44,12 +44,11 @@ pub fn run_daemon_background(paths: &MonoPaths) -> Result<()> {
         platform.remove_pid_file(&paths.pid_file)?;
     }
 
-    let stdout = File::create(&paths.log_file).map_err(|e| {
-        MonoError::DaemonStart(format!("Failed to create log file: {}", e))
-    })?;
-    let stderr = stdout.try_clone().map_err(|e| {
-        MonoError::DaemonStart(format!("Failed to clone log file handle: {}", e))
-    })?;
+    let stdout = File::create(&paths.log_file)
+        .map_err(|e| MonoError::DaemonStart(format!("Failed to create log file: {}", e)))?;
+    let stderr = stdout
+        .try_clone()
+        .map_err(|e| MonoError::DaemonStart(format!("Failed to clone log file handle: {}", e)))?;
 
     let daemonize = Daemonize::new()
         .pid_file(&paths.pid_file)
@@ -69,9 +68,8 @@ pub fn run_daemon_background(paths: &MonoPaths) -> Result<()> {
         .init();
 
     let paths_clone = paths.clone();
-    let rt = tokio::runtime::Runtime::new().map_err(|e| {
-        MonoError::DaemonStart(format!("Failed to create tokio runtime: {}", e))
-    })?;
+    let rt = tokio::runtime::Runtime::new()
+        .map_err(|e| MonoError::DaemonStart(format!("Failed to create tokio runtime: {}", e)))?;
 
     rt.block_on(async {
         let result = run_daemon_main(&paths_clone).await;
@@ -87,7 +85,11 @@ async fn run_daemon_main(paths: &MonoPaths) -> Result<()> {
     run_migrations(&pool).await?;
 
     let storage = SqliteStorage::new(pool);
-    let state = Arc::new(DaemonState::new(storage, paths.clone(), settings));
+    let mut daemon_state = DaemonState::new(storage, paths.clone(), settings);
+
+    daemon_state.init_notification_backend().await;
+
+    let state = Arc::new(daemon_state);
 
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
@@ -122,13 +124,11 @@ async fn run_daemon_main(paths: &MonoPaths) -> Result<()> {
         }
     }
 
-    let _ = tokio::time::timeout(
-        tokio::time::Duration::from_secs(5),
-        async {
-            let _ = server_handle.await;
-            let _ = scheduler_handle.await;
-        }
-    ).await;
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), async {
+        let _ = server_handle.await;
+        let _ = scheduler_handle.await;
+    })
+    .await;
 
     info!("Daemon stopped");
     Ok(())
@@ -137,7 +137,7 @@ async fn run_daemon_main(paths: &MonoPaths) -> Result<()> {
 async fn setup_signal_handler(state: Arc<DaemonState>, _shutdown_tx: broadcast::Sender<()>) {
     #[cfg(unix)]
     {
-        use tokio::signal::unix::{signal, SignalKind};
+        use tokio::signal::unix::{SignalKind, signal};
 
         let mut sigterm = signal(SignalKind::terminate()).expect("Failed to setup SIGTERM handler");
         let mut sigint = signal(SignalKind::interrupt()).expect("Failed to setup SIGINT handler");
@@ -156,7 +156,9 @@ async fn setup_signal_handler(state: Arc<DaemonState>, _shutdown_tx: broadcast::
 
     #[cfg(not(unix))]
     {
-        tokio::signal::ctrl_c().await.expect("Failed to setup Ctrl+C handler");
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Failed to setup Ctrl+C handler");
         info!("Received Ctrl+C");
         state.request_shutdown().await;
     }

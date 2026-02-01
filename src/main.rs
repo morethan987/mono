@@ -3,6 +3,7 @@ mod config;
 mod daemon;
 mod error;
 mod models;
+mod notification;
 mod platform;
 mod protocol;
 mod scheduling;
@@ -12,8 +13,9 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::{
-    Cli, Commands, ConfigAction, DaemonAction, DaemonClient, format_task_detail, format_task_list,
-    parse_deadline, print_error, print_info, print_success, print_warning,
+    Cli, Commands, ConfigAction, DaemonAction, DaemonClient, format_ranked_task_list,
+    format_task_detail, format_task_list, parse_deadline, print_error, print_info, print_success,
+    print_warning,
 };
 use crate::config::{MonoPaths, Settings};
 use crate::daemon::{daemon_status, run_daemon_background, run_daemon_foreground, stop_daemon};
@@ -262,28 +264,7 @@ async fn handle_replan(paths: &MonoPaths) -> error::Result<()> {
                 print_info("没有待办任务需要规划");
             } else {
                 println!("\n🔄 重新规划完成 ({} 项任务):\n", tasks.len());
-                println!("{:<8} {:<6} {:<50} {:>6}", "ID", "优先级", "标题", "得分");
-                println!("{}", "-".repeat(80));
-                for ranked in &tasks {
-                    let priority_str = match ranked.task.priority {
-                        models::Priority::Urgent => "🔴",
-                        models::Priority::High => "🟠",
-                        models::Priority::Medium => "🟡",
-                        models::Priority::Low => "🟢",
-                    };
-                    let title = if ranked.task.title.len() > 48 {
-                        format!("{}...", &ranked.task.title[..45])
-                    } else {
-                        ranked.task.title.clone()
-                    };
-                    println!(
-                        "{:<8} {:<6} {:<50} {:>5.2}",
-                        ranked.task.short_id(),
-                        priority_str,
-                        title,
-                        ranked.score
-                    );
-                }
+                println!("{}", format_ranked_task_list(&tasks));
                 println!();
                 if let Some(first) = tasks.first() {
                     print_success(&format!("下一个任务: {}", first.task.title));
