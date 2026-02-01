@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod daemon;
 mod error;
+mod learning;
 mod models;
 mod notification;
 mod platform;
@@ -20,7 +21,7 @@ use crate::cli::{
 use crate::config::{MonoPaths, Settings};
 use crate::daemon::{daemon_status, run_daemon_background, run_daemon_foreground, stop_daemon};
 use crate::models::TaskStatus;
-use crate::protocol::{Request, Response};
+use crate::protocol::{Request, Response, TimeSlotDetail};
 
 fn main() {
     let cli = Cli::parse();
@@ -81,11 +82,9 @@ async fn run(cli: Cli) -> error::Result<()> {
         Commands::Postpone(args) => handle_postpone(args, &paths).await,
         Commands::Delete(args) => handle_delete(args, &paths).await,
         Commands::Update(args) => handle_update(args, &paths).await,
-        Commands::Feedback(_args) => {
-            print_warning("feedback 命令将在 Phase 4 实现");
-            Ok(())
-        }
+        Commands::Feedback(args) => handle_feedback(args, &paths).await,
         Commands::Replan => handle_replan(&paths).await,
+        Commands::Stats(args) => handle_stats(args, &paths).await,
         Commands::Config { action } => handle_config(action, &paths),
     }
 }
@@ -211,6 +210,22 @@ async fn handle_now(paths: &MonoPaths) -> error::Result<()> {
         Response::CurrentTask { task: Some(task) } => {
             println!("\n📌 现在应该做:\n");
             println!("{}", format_task_detail(&task));
+            
+            let rec_response = client
+                .request(Request::GetTimeSlotRecommendation {
+                    task_id: task.short_id().to_string(),
+                })
+                .await?;
+            if let Response::TimeSlotRecommendation {
+                recommended_slot,
+                confidence,
+                ..
+            } = rec_response
+            {
+                if confidence > 0.3 {
+                    println!("\n💡 推荐时段: {} (置信度: {:.0}%)", recommended_slot, confidence * 100.0);
+                }
+            }
         }
         Response::CurrentTask { task: None } => {
             print_info("没有待办任务，享受当下吧！🎉");
@@ -296,6 +311,25 @@ async fn handle_complete(args: cli::CompleteArgs, paths: &MonoPaths) -> error::R
     match response {
         Response::Task { task } => {
             print_success(&format!("任务已完成: {}", task.title));
+
+            if !args.skip_feedback && atty::is(atty::Stream::Stdin) {
+                println!();
+                if let Some(feedback) = prompt_for_feedback() {
+                    let feedback_response = client
+                        .request(Request::SubmitFeedback {
+                            task_id: args.id.clone(),
+                            rating: feedback.rating,
+                            difficulty: feedback.difficulty,
+                            energy_level: feedback.energy,
+                            notes: None,
+                        })
+                        .await?;
+
+                    if let Response::Ok = feedback_response {
+                        print_info("感谢反馈！这将帮助优化未来的任务调度");
+                    }
+                }
+            }
         }
         Response::Error { message } => {
             print_error(&message);
@@ -306,6 +340,54 @@ async fn handle_complete(args: cli::CompleteArgs, paths: &MonoPaths) -> error::R
     }
 
     Ok(())
+}
+
+struct QuickFeedback {
+    rating: Option<u8>,
+    difficulty: Option<u8>,
+    energy: Option<u8>,
+}
+
+fn prompt_for_feedback() -> Option<QuickFeedback> {
+    use std::io::{BufRead, Write};
+
+    print!("快速反馈 (1-5分，回车跳过): 满意度? ");
+    std::io::stdout().flush().ok();
+
+    let stdin = std::io::stdin();
+    let mut lines = stdin.lock().lines();
+
+    let rating = lines
+        .next()
+        .and_then(|r| r.ok())
+        .and_then(|s| s.trim().parse::<u8>().ok())
+        .filter(|&r| r >= 1 && r <= 5);
+
+    if rating.is_none() {
+        return None;
+    }
+
+    print!("难度 (1=容易, 5=困难)? ");
+    std::io::stdout().flush().ok();
+    let difficulty = lines
+        .next()
+        .and_then(|r| r.ok())
+        .and_then(|s| s.trim().parse::<u8>().ok())
+        .filter(|&d| d >= 1 && d <= 5);
+
+    print!("当前精力 (1=疲惫, 5=充沛)? ");
+    std::io::stdout().flush().ok();
+    let energy = lines
+        .next()
+        .and_then(|r| r.ok())
+        .and_then(|s| s.trim().parse::<u8>().ok())
+        .filter(|&e| e >= 1 && e <= 5);
+
+    Some(QuickFeedback {
+        rating,
+        difficulty,
+        energy,
+    })
 }
 
 async fn handle_postpone(args: cli::PostponeArgs, paths: &MonoPaths) -> error::Result<()> {
@@ -430,6 +512,128 @@ async fn handle_update(args: cli::UpdateArgs, paths: &MonoPaths) -> error::Resul
     }
 
     Ok(())
+}
+
+async fn handle_feedback(args: cli::FeedbackArgs, paths: &MonoPaths) -> error::Result<()> {
+    let settings = Settings::load(&paths.config_file()).unwrap_or_default();
+    let mut client = DaemonClient::connect(&paths.socket, settings.daemon.ipc_timeout_secs).await?;
+
+    let response = client
+        .request(Request::SubmitFeedback {
+            task_id: args.id.clone(),
+            rating: args.rating.map(|r| r.min(5)),
+            difficulty: args.difficulty.map(|d| d.min(5)),
+            energy_level: args.energy.map(|e| e.min(5)),
+            notes: args.notes,
+        })
+        .await?;
+
+    match response {
+        Response::Ok => {
+            print_success("反馈已提交，将用于优化未来的任务调度");
+        }
+        Response::Error { message } => {
+            print_error(&message);
+        }
+        _ => {
+            print_error("意外的响应");
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_stats(args: cli::StatsArgs, paths: &MonoPaths) -> error::Result<()> {
+    let settings = Settings::load(&paths.config_file()).unwrap_or_default();
+    let mut client = DaemonClient::connect(&paths.socket, settings.daemon.ipc_timeout_secs).await?;
+
+    let response = client
+        .request(Request::GetLearningStats {
+            task_type: args.task_type,
+        })
+        .await?;
+
+    match response {
+        Response::LearningStats { stats } => {
+            println!("\n📊 学习统计\n");
+            println!("总学习任务数: {}", stats.total_tasks_learned);
+            println!();
+
+            if stats.task_type_stats.is_empty() {
+                print_info("暂无任务类型统计数据，完成更多任务后将显示学习成果");
+            } else {
+                println!("📋 任务类型统计:");
+                println!("{}", "─".repeat(60));
+                for ts in &stats.task_type_stats {
+                    println!(
+                        "  {} [{}]",
+                        ts.task_type,
+                        format_best_time_slot(&ts.best_time_slot)
+                    );
+                    println!(
+                        "    调度: {} | 完成: {} | 推迟: {} | 完成率: {:.1}%",
+                        ts.total_scheduled,
+                        ts.total_completed,
+                        ts.total_postponed,
+                        ts.completion_rate * 100.0
+                    );
+                    if let Some(avg) = ts.avg_duration_minutes {
+                        println!("    平均用时: {:.0} 分钟", avg);
+                    }
+                    println!();
+                }
+            }
+
+            if args.verbose {
+                println!("⏰ 时段成功率:");
+                println!("{}", "─".repeat(60));
+                print_time_slot_bar("  🌅 早晨 (6-12)", &stats.time_slot_stats.morning);
+                print_time_slot_bar("  ☀️ 下午 (12-18)", &stats.time_slot_stats.afternoon);
+                print_time_slot_bar("  🌆 傍晚 (18-22)", &stats.time_slot_stats.evening);
+                print_time_slot_bar("  🌙 夜间 (22-6)", &stats.time_slot_stats.night);
+                println!();
+            }
+        }
+        Response::Error { message } => {
+            print_error(&message);
+        }
+        _ => {
+            print_error("意外的响应");
+        }
+    }
+
+    Ok(())
+}
+
+fn format_best_time_slot(slot: &str) -> &'static str {
+    match slot {
+        "Morning" => "最佳: 早晨",
+        "Afternoon" => "最佳: 下午",
+        "Evening" => "最佳: 傍晚",
+        "Night" => "最佳: 夜间",
+        _ => "探索中",
+    }
+}
+
+fn print_time_slot_bar(label: &str, detail: &TimeSlotDetail) {
+    let total = detail.successes + detail.failures;
+    let bar_width = 20;
+    let filled = if total > 0 {
+        ((detail.success_rate * bar_width as f64) as usize).min(bar_width)
+    } else {
+        0
+    };
+    let empty = bar_width - filled;
+
+    println!(
+        "{}: [{}{}] {:.0}% ({}/{})",
+        label,
+        "█".repeat(filled),
+        "░".repeat(empty),
+        detail.success_rate * 100.0,
+        detail.successes,
+        total
+    );
 }
 
 fn handle_config(action: Option<ConfigAction>, paths: &MonoPaths) -> error::Result<()> {
