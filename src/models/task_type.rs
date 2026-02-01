@@ -13,7 +13,7 @@ impl TaskType {
     pub fn from_tags(tags: &[String]) -> Self {
         tags.first()
             .map(|t| TaskType { name: t.clone() })
-            .unwrap_or_else(Self::default)
+            .unwrap_or_default()
     }
 
     pub fn is_default(&self) -> bool {

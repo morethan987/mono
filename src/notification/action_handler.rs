@@ -65,11 +65,7 @@ impl ActionHandler {
         Ok(updated)
     }
 
-    async fn postpone_task<R: TaskRepository>(
-        repo: &R,
-        task: &Task,
-        minutes: u32,
-    ) -> Result<Task> {
+    async fn postpone_task<R: TaskRepository>(repo: &R, task: &Task, minutes: u32) -> Result<Task> {
         info!(
             "Postponing task: {} ({}) by {} minutes",
             task.title,

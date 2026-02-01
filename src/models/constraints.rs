@@ -1,23 +1,12 @@
 use chrono::{DateTime, Datelike, NaiveTime, Utc, Weekday};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TimeConstraint {
     pub start_time: Option<NaiveTime>,
     pub end_time: Option<NaiveTime>,
     pub allowed_days: Option<Vec<Weekday>>,
     pub excluded_dates: Vec<DateTime<Utc>>,
-}
-
-impl Default for TimeConstraint {
-    fn default() -> Self {
-        Self {
-            start_time: None,
-            end_time: None,
-            allowed_days: None,
-            excluded_dates: Vec::new(),
-        }
-    }
 }
 
 impl TimeConstraint {
@@ -61,19 +50,10 @@ impl TimeConstraint {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DependencyConstraint {
     pub depends_on: Vec<String>,
     pub blocks: Vec<String>,
-}
-
-impl Default for DependencyConstraint {
-    fn default() -> Self {
-        Self {
-            depends_on: Vec::new(),
-            blocks: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

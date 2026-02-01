@@ -4,7 +4,10 @@ use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
 
 use crate::daemon::DaemonState;
-use crate::notification::{ActionHandler, NotificationAction, NotificationBackend, NotificationResponse, LinuxNotificationBackend};
+use crate::notification::{
+    ActionHandler, LinuxNotificationBackend, NotificationAction, NotificationBackend,
+    NotificationResponse,
+};
 use crate::storage::TaskRepository;
 
 pub struct Scheduler {
@@ -43,7 +46,8 @@ impl Scheduler {
             return;
         }
 
-        let notification_backend: &LinuxNotificationBackend = match &self.state.notification_backend {
+        let notification_backend: &LinuxNotificationBackend = match &self.state.notification_backend
+        {
             Some(backend) => backend,
             None => {
                 debug!("Notification backend not available");

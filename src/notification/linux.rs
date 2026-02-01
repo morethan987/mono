@@ -1,3 +1,6 @@
+// D-Bus notification spec requires many arguments for notify()
+#![allow(clippy::too_many_arguments)]
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,7 +10,7 @@ use futures_util::StreamExt;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 use tracing::{debug, info, warn};
-use zbus::{proxy, zvariant::Value, Connection};
+use zbus::{Connection, proxy, zvariant::Value};
 
 use crate::error::Result;
 use crate::models::Task;
@@ -101,7 +104,7 @@ impl NotificationBackend for LinuxNotificationBackend {
         );
 
         let actions_array = Self::build_actions_array(actions);
-        let actions_refs: Vec<&str> = actions_array.iter().map(|s| *s).collect();
+        let actions_refs: Vec<&str> = actions_array.to_vec();
 
         let hints: HashMap<&str, &Value<'_>> = HashMap::new();
 
@@ -138,22 +141,20 @@ impl NotificationBackend for LinuxNotificationBackend {
                     // Prioritize action_stream by placing it first with biased mode
                     biased;
                     Some(signal) = action_stream.next() => {
-                        if let Ok(args) = signal.args() {
-                            if args.id == notification_id {
+                        if let Ok(args) = signal.args()
+                            && args.id == notification_id {
                                 debug!("Action invoked: id={}, action={}", args.id, args.action_key);
                                 action_result = Some(args.action_key.to_string());
                                 // Don't return immediately - wait for NotificationClosed to ensure cleanup
                             }
-                        }
                     }
                     Some(signal) = closed_stream.next() => {
-                        if let Ok(args) = signal.args() {
-                            if args.id == notification_id {
+                        if let Ok(args) = signal.args()
+                            && args.id == notification_id {
                                 debug!("Notification closed: id={}, reason={}", args.id, args.reason);
                                 // If we already received an action, return it; otherwise return None
                                 return action_result;
                             }
-                        }
                     }
                 }
             }
@@ -176,7 +177,16 @@ impl NotificationBackend for LinuxNotificationBackend {
         let empty_actions: &[&str] = &[];
 
         proxy
-            .notify("mono", 0, "dialog-information", title, body, empty_actions, hints, 5000)
+            .notify(
+                "mono",
+                0,
+                "dialog-information",
+                title,
+                body,
+                empty_actions,
+                hints,
+                5000,
+            )
             .await
             .map_err(|e| notification_error(format!("发送通知失败: {}", e)))?;
 

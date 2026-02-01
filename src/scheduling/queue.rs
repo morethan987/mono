@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use crate::models::Task;
 use crate::scheduling::policy::ScoredTask;
 
 struct HeapEntry {

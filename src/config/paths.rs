@@ -45,13 +45,13 @@ impl MonoPaths {
             source: e,
         })?;
 
-        if let Some(parent) = self.socket.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent).map_err(|e| MonoError::DirectoryCreation {
-                    path: parent.to_path_buf(),
-                    source: e,
-                })?;
-            }
+        if let Some(parent) = self.socket.parent()
+            && !parent.exists()
+        {
+            fs::create_dir_all(parent).map_err(|e| MonoError::DirectoryCreation {
+                path: parent.to_path_buf(),
+                source: e,
+            })?;
         }
 
         Ok(())

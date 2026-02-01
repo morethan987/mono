@@ -1,13 +1,13 @@
 use chrono::{DateTime, Utc};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::RwLock;
 
 use crate::config::{MonoPaths, Settings};
 use crate::learning::LearningManager;
 use crate::notification::LinuxNotificationBackend;
-use crate::scheduling::policy::LearningPolicy;
 use crate::scheduling::SchedulingEngine;
+use crate::scheduling::policy::LearningPolicy;
 use crate::storage::SqliteStorage;
 
 const SAVE_AFTER_N_UPDATES: u32 = 10;
@@ -84,7 +84,10 @@ impl DaemonState {
     }
 
     pub async fn maybe_save_learning_model(&self) {
-        let count = self.learning_updates_since_save.fetch_add(1, Ordering::Relaxed) + 1;
+        let count = self
+            .learning_updates_since_save
+            .fetch_add(1, Ordering::Relaxed)
+            + 1;
         if count >= SAVE_AFTER_N_UPDATES {
             self.save_learning_model().await;
         }

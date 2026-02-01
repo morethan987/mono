@@ -1,5 +1,3 @@
-use chrono::Utc;
-
 use crate::models::Task;
 use crate::scheduling::policy::{SchedulingContext, SchedulingPolicy};
 
@@ -76,7 +74,7 @@ impl SchedulingPolicy for DeadlinePolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Duration;
+    use chrono::{Duration, Utc};
 
     #[test]
     fn test_overdue_task() {

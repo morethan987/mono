@@ -13,10 +13,7 @@ mod ftrl;
 mod manager;
 mod reward;
 
-pub use bandit::{ArmStats, TimeSlotArm, TimeSlotBandit};
-pub use features::{FeatureExtractor, FeatureVector};
-pub use ftrl::FtrlModel;
+pub use bandit::{TimeSlotArm, TimeSlotBandit};
 pub use manager::{
     GlobalLearningModel, LearningManager, LearningManagerState, TaskTypeLearningModel,
 };
-pub use reward::{compute_reward, RewardSignal};

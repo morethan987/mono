@@ -4,7 +4,10 @@ use sqlx::{Pool, Row, Sqlite};
 
 use crate::error::{MonoError, Result};
 use crate::models::{Feedback, FeedbackType, Priority, Schedule, ScheduleStatus, Task, TaskStatus};
-use crate::storage::repository::{FeedbackRepository, LearningRepository, ScheduleRepository, TaskRepository, TaskTypeStats, TimeSlotStats};
+use crate::storage::repository::{
+    FeedbackRepository, LearningRepository, ScheduleRepository, TaskRepository, TaskTypeStats,
+    TimeSlotStats,
+};
 
 #[derive(Clone)]
 pub struct SqliteStorage {
@@ -540,8 +543,8 @@ impl LearningRepository for SqliteStorage {
     }
 
     async fn upsert_task_type_stats(&self, stats: &TaskTypeStats) -> Result<()> {
-        let best_time_slots_json = serde_json::to_string(&stats.best_time_slots)
-            .unwrap_or_else(|_| "[]".to_string());
+        let best_time_slots_json =
+            serde_json::to_string(&stats.best_time_slots).unwrap_or_else(|_| "[]".to_string());
 
         sqlx::query(
             r#"

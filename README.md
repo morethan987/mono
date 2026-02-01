@@ -131,9 +131,3 @@ $ mono stats -v
 - [x] Phase 5: 反馈闭环与持久化模型
 - [ ] Phase 6: Web UI 控制面板
 - [ ] Phase 7: 多端同步支持
-
----
-
-## 📜 许可证
-
-MIT License

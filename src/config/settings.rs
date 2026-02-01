@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default)]
     pub daemon: DaemonSettings,
@@ -98,16 +98,6 @@ impl Default for SchedulingSettings {
             work_start_hour: default_work_start_hour(),
             work_end_hour: default_work_end_hour(),
             default_duration_mins: default_default_duration_mins(),
-        }
-    }
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            daemon: DaemonSettings::default(),
-            notification: NotificationSettings::default(),
-            scheduling: SchedulingSettings::default(),
         }
     }
 }

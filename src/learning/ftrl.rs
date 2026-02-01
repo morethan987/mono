@@ -6,7 +6,7 @@
 //!
 //! Reference: "Ad Click Prediction: a View from the Trenches" (Google, 2013)
 
-use crate::learning::FeatureVector;
+use crate::learning::features::FeatureVector;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -147,6 +147,10 @@ impl FtrlModel {
             .count()
     }
 
+    pub fn weights_count(&self) -> usize {
+        self.num_weights()
+    }
+
     /// Get all non-zero weights as a HashMap.
     pub fn weights(&self) -> HashMap<u32, f64> {
         let mut result = HashMap::new();
@@ -202,7 +206,7 @@ mod tests {
 
     #[test]
     fn test_ftrl_basic() {
-        let mut model = FtrlModel::new();
+        let model = FtrlModel::new();
 
         // Initial prediction should be 0.5 (no weights)
         let features = FeatureVector::new();

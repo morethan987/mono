@@ -122,10 +122,7 @@ pub fn format_task_short(task: &Task) -> String {
         Priority::Urgent => "⚡".red().to_string(),
     };
 
-    let deadline_str = task
-        .deadline
-        .map(|d| format_relative_time(d))
-        .unwrap_or_default();
+    let deadline_str = task.deadline.map(format_relative_time).unwrap_or_default();
 
     let duration_str = task
         .estimated_minutes
