@@ -493,6 +493,121 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
                 task_type_models,
             }
         }
+
+        Request::StartTask { id } => {
+            match state.storage.get_by_short_id(&id).await {
+                Ok(Some(mut task)) => {
+                    let pending_tasks = match state.storage.list_pending().await {
+                        Ok(tasks) => tasks,
+                        Err(e) => {
+                            return Response::error(format!("Failed to get pending tasks: {}", e));
+                        }
+                    };
+
+                    let system_recommendation = state
+                        .scheduler
+                        .get_next_task(pending_tasks.clone())
+                        .map(|st| st.task);
+
+                    let matched_recommendation = system_recommendation
+                        .as_ref()
+                        .is_some_and(|rec| rec.id == task.id);
+
+                    task.status = TaskStatus::InProgress;
+                    task.started_at = Some(Utc::now());
+                    task.updated_at = Utc::now();
+
+                    match state.storage.update(&task).await {
+                        Ok(()) => {
+                            // 用户选择与系统推荐不同时记录为隐式反馈，用于改进推荐算法
+                            if !matched_recommendation {
+                                let feedback = Feedback::new(
+                                    task.id.clone(),
+                                    crate::models::FeedbackType::UserChoice,
+                                );
+                                let mut lm = state.learning_manager.write().await;
+                                lm.update_from_feedback(&task, &feedback);
+                                drop(lm);
+                                state.maybe_save_learning_model().await;
+                                debug!(
+                                    "User chose different task than recommendation: {} vs {:?}",
+                                    task.short_id(),
+                                    system_recommendation.as_ref().map(|t| t.short_id())
+                                );
+                            }
+                            Response::StartTaskResult {
+                                task,
+                                system_recommendation,
+                                matched_recommendation,
+                            }
+                        }
+                        Err(e) => Response::error(format!("Failed to start task: {}", e)),
+                    }
+                }
+                Ok(None) => Response::error(format!("Task not found: {}", id)),
+                Err(e) => Response::error(format!("Database error: {}", e)),
+            }
+        }
+
+        Request::InterruptTask { id, remaining_minutes } => {
+            let task_result = if id.is_empty() {
+                state.storage.list_in_progress().await.map(|tasks| tasks.into_iter().next())
+            } else {
+                state.storage.get_by_short_id(&id).await
+            };
+
+            match task_result {
+                Ok(Some(mut task)) => {
+                    if task.status != TaskStatus::InProgress {
+                        return Response::error(format!(
+                            "Task {} is not in progress (status: {})",
+                            task.short_id(),
+                            task.status
+                        ));
+                    }
+
+                    let remaining = remaining_minutes.unwrap_or_else(|| {
+                        let elapsed = task
+                            .started_at
+                            .map(|s| (Utc::now() - s).num_minutes().max(0) as u32)
+                            .unwrap_or(0);
+                        task.estimated_minutes
+                            .map(|est| est.saturating_sub(elapsed))
+                            .unwrap_or(0)
+                    });
+
+                    // 保存剩余时间以便下次继续时使用
+                    task.estimated_minutes = Some(remaining);
+                    task.status = TaskStatus::Pending;
+                    task.started_at = None;
+                    task.updated_at = Utc::now();
+
+                    match state.storage.update(&task).await {
+                        Ok(()) => {
+                            let feedback = Feedback::interrupted(task.id.clone());
+                            let mut lm = state.learning_manager.write().await;
+                            lm.update_from_feedback(&task, &feedback);
+                            drop(lm);
+                            state.maybe_save_learning_model().await;
+                            debug!("Task interrupted: {}, remaining: {} min", task.short_id(), remaining);
+                            Response::InterruptTaskResult {
+                                task,
+                                remaining_minutes: remaining,
+                            }
+                        }
+                        Err(e) => Response::error(format!("Failed to interrupt task: {}", e)),
+                    }
+                }
+                Ok(None) => {
+                    if id.is_empty() {
+                        Response::error("No task currently in progress".to_string())
+                    } else {
+                        Response::error(format!("Task not found: {}", id))
+                    }
+                }
+                Err(e) => Response::error(format!("Database error: {}", e)),
+            }
+        }
     }
 }
 

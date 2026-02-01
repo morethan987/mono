@@ -9,6 +9,7 @@ pub enum FeedbackType {
     Postponed,
     Skipped,
     Interrupted,
+    UserChoice,
 }
 
 impl FeedbackType {
@@ -18,6 +19,7 @@ impl FeedbackType {
             FeedbackType::Postponed => "postponed",
             FeedbackType::Skipped => "skipped",
             FeedbackType::Interrupted => "interrupted",
+            FeedbackType::UserChoice => "user_choice",
         }
     }
 
@@ -27,6 +29,7 @@ impl FeedbackType {
             "postponed" => Some(FeedbackType::Postponed),
             "skipped" => Some(FeedbackType::Skipped),
             "interrupted" => Some(FeedbackType::Interrupted),
+            "user_choice" => Some(FeedbackType::UserChoice),
             _ => None,
         }
     }
@@ -78,6 +81,10 @@ impl Feedback {
 
     pub fn skipped(task_id: String) -> Self {
         Self::new(task_id, FeedbackType::Skipped)
+    }
+
+    pub fn interrupted(task_id: String) -> Self {
+        Self::new(task_id, FeedbackType::Interrupted)
     }
 
     pub fn with_rating(mut self, rating: u8) -> Self {

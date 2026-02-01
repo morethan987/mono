@@ -29,6 +29,7 @@ pub fn compute_reward(feedback: &Feedback, estimated_minutes: Option<u32>) -> Re
         FeedbackType::Postponed => 0.2,
         FeedbackType::Skipped => 0.0,
         FeedbackType::Interrupted => 0.3,
+        FeedbackType::UserChoice => 0.5,
     };
 
     let rating_bonus = feedback
@@ -43,6 +44,7 @@ pub fn compute_reward(feedback: &Feedback, estimated_minutes: Option<u32>) -> Re
         FeedbackType::Postponed => 0.7,
         FeedbackType::Skipped => 0.5,
         FeedbackType::Interrupted => 0.6,
+        FeedbackType::UserChoice => 0.8,
     };
 
     RewardSignal::new(final_reward).with_confidence(confidence)
@@ -76,6 +78,7 @@ pub fn feedback_to_label(feedback: &Feedback) -> f64 {
         FeedbackType::Postponed => 0.3,
         FeedbackType::Skipped => 0.0,
         FeedbackType::Interrupted => 0.2,
+        FeedbackType::UserChoice => 0.5,
     }
 }
 

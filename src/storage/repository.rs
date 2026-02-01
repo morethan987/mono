@@ -50,6 +50,7 @@ pub trait TaskRepository: Send + Sync {
     async fn get_by_short_id(&self, short_id: &str) -> Result<Option<Task>>;
     async fn list(&self, status: Option<TaskStatus>, limit: Option<u32>) -> Result<Vec<Task>>;
     async fn list_pending(&self) -> Result<Vec<Task>>;
+    async fn list_in_progress(&self) -> Result<Vec<Task>>;
     async fn list_today(&self) -> Result<Vec<Task>>;
     async fn list_ready_for_notification(&self) -> Result<Vec<Task>>;
     async fn update(&self, task: &Task) -> Result<()>;

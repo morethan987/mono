@@ -57,6 +57,21 @@ pub enum Response {
         global_stats: GlobalModelStats,
         task_type_models: Vec<TaskTypeModelStats>,
     },
+
+    StartTaskResult {
+        task: Task,
+        system_recommendation: Option<Task>,
+        matched_recommendation: bool,
+    },
+
+    InterruptTaskResult {
+        task: Task,
+        remaining_minutes: u32,
+    },
+
+    InProgressTask {
+        task: Option<Task>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

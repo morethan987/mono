@@ -155,6 +155,10 @@ impl TaskRepository for SqliteStorage {
         self.list(Some(TaskStatus::Pending), None).await
     }
 
+    async fn list_in_progress(&self) -> Result<Vec<Task>> {
+        self.list(Some(TaskStatus::InProgress), None).await
+    }
+
     async fn list_today(&self) -> Result<Vec<Task>> {
         let today_start = Utc::now().date_naive().and_hms_opt(0, 0, 0).unwrap();
         let today_end = Utc::now().date_naive().and_hms_opt(23, 59, 59).unwrap();

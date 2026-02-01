@@ -56,7 +56,7 @@ impl TaskTypeLearningModel {
             crate::models::FeedbackType::Completed => self.total_completed += 1,
             crate::models::FeedbackType::Postponed => self.total_postponed += 1,
             crate::models::FeedbackType::Skipped => self.total_skipped += 1,
-            crate::models::FeedbackType::Interrupted => {}
+            crate::models::FeedbackType::Interrupted | crate::models::FeedbackType::UserChoice => {}
         }
 
         let arm = TimeSlotArm::from_hour(scheduled_at.hour());

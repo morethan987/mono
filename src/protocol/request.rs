@@ -100,6 +100,15 @@ pub enum Request {
     GetDaemonStatus,
 
     Replan,
+
+    StartTask {
+        id: String,
+    },
+
+    InterruptTask {
+        id: String,
+        remaining_minutes: Option<u32>,
+    },
 }
 
 impl Request {
@@ -127,6 +136,8 @@ impl Request {
             Request::InspectLearningModel { .. } => "inspect_learning_model",
             Request::GetDaemonStatus => "get_daemon_status",
             Request::Replan => "replan",
+            Request::StartTask { .. } => "start_task",
+            Request::InterruptTask { .. } => "interrupt_task",
         }
     }
 }

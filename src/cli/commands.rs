@@ -51,6 +51,12 @@ pub enum Commands {
     #[command(about = "重新规划日程")]
     Replan,
 
+    #[command(about = "开始执行任务")]
+    Start(StartArgs),
+
+    #[command(about = "中断当前任务")]
+    Interrupt(InterruptArgs),
+
     #[command(about = "查看学习统计")]
     Stats {
         #[command(subcommand)]
@@ -131,6 +137,21 @@ pub struct PostponeArgs {
 
     #[arg(short, long, default_value = "15", help = "推迟分钟数")]
     pub minutes: u32,
+}
+
+#[derive(Args)]
+pub struct StartArgs {
+    #[arg(help = "任务 ID（可使用短 ID）")]
+    pub id: String,
+}
+
+#[derive(Args)]
+pub struct InterruptArgs {
+    #[arg(help = "任务 ID（可使用短 ID，默认为当前进行中的任务）")]
+    pub id: Option<String>,
+
+    #[arg(short, long, help = "剩余时间（分钟），不指定则自动计算")]
+    pub remaining: Option<u32>,
 }
 
 #[derive(Args)]

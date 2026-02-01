@@ -19,7 +19,7 @@ use tracing_subscriber::EnvFilter;
 use crate::cli::{
     Cli, Commands, ConfigAction, DaemonAction, DaemonClient, StatsAction, format_ranked_task_list,
     format_task_detail, format_task_list, parse_deadline, print_error, print_info, print_success,
-    print_warning,
+    print_warning, InterruptArgs, StartArgs,
 };
 use crate::config::{MonoPaths, Settings};
 use crate::daemon::{daemon_status, run_daemon_background, run_daemon_foreground, stop_daemon};
@@ -89,6 +89,8 @@ async fn run(cli: Cli) -> error::Result<()> {
         Commands::Update(args) => handle_update(args, &paths).await,
         Commands::Feedback(args) => handle_feedback(args, &paths).await,
         Commands::Replan => handle_replan(&paths).await,
+        Commands::Start(args) => handle_start(args, &paths).await,
+        Commands::Interrupt(args) => handle_interrupt(args, &paths).await,
         Commands::Stats { action } => handle_stats(action, &paths).await,
         Commands::Config { action } => handle_config(action, &paths),
     }
@@ -291,6 +293,75 @@ async fn handle_replan(paths: &MonoPaths) -> error::Result<()> {
                     print_success(&format!("下一个任务: {}", first.task.title));
                 }
             }
+        }
+        Response::Error { message } => {
+            print_error(&message);
+        }
+        _ => {
+            print_error("意外的响应");
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_start(args: StartArgs, paths: &MonoPaths) -> error::Result<()> {
+    let settings = Settings::load(&paths.config_file()).unwrap_or_default();
+    let mut client = DaemonClient::connect(&paths.socket, settings.daemon.ipc_timeout_secs).await?;
+
+    let response = client
+        .request(Request::StartTask { id: args.id.clone() })
+        .await?;
+
+    match response {
+        Response::StartTaskResult {
+            task,
+            system_recommendation,
+            matched_recommendation,
+        } => {
+            print_success(&format!("开始执行任务: {}", task.title));
+            println!("{}", format_task_detail(&task));
+
+            if matched_recommendation {
+                println!("\n✅ 与系统推荐一致");
+            } else if let Some(rec) = system_recommendation {
+                println!("\n💡 系统原本推荐: {}", rec.title);
+                print_info("已记录您的选择偏好，将用于优化未来推荐");
+            }
+        }
+        Response::Error { message } => {
+            print_error(&message);
+        }
+        _ => {
+            print_error("意外的响应");
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_interrupt(args: InterruptArgs, paths: &MonoPaths) -> error::Result<()> {
+    let settings = Settings::load(&paths.config_file()).unwrap_or_default();
+    let mut client = DaemonClient::connect(&paths.socket, settings.daemon.ipc_timeout_secs).await?;
+
+    let id = args.id.unwrap_or_default();
+    let response = client
+        .request(Request::InterruptTask {
+            id,
+            remaining_minutes: args.remaining,
+        })
+        .await?;
+
+    match response {
+        Response::InterruptTaskResult {
+            task,
+            remaining_minutes,
+        } => {
+            print_success(&format!("任务已中断: {}", task.title));
+            if remaining_minutes > 0 {
+                println!("⏳ 剩余时间: {} 分钟 (已保存)", remaining_minutes);
+            }
+            print_info("任务已放回待办列表，可随时继续");
         }
         Response::Error { message } => {
             print_error(&message);
