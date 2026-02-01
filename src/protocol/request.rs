@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::models::{Priority, Task, TaskStatus};
+use crate::models::{Priority, TaskStatus};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -60,6 +60,22 @@ pub enum Request {
         deadline: Option<DateTime<Utc>>,
     },
 
+    SubmitFeedback {
+        task_id: String,
+        rating: Option<u8>,
+        difficulty: Option<u8>,
+        energy_level: Option<u8>,
+        notes: Option<String>,
+    },
+
+    GetLearningStats {
+        task_type: Option<String>,
+    },
+
+    GetTimeSlotRecommendation {
+        task_id: String,
+    },
+
     GetDaemonStatus,
 
     Replan,
@@ -80,6 +96,9 @@ impl Request {
             Request::PostponeTask { .. } => "postpone_task",
             Request::DeleteTask { .. } => "delete_task",
             Request::UpdateTask { .. } => "update_task",
+            Request::SubmitFeedback { .. } => "submit_feedback",
+            Request::GetLearningStats { .. } => "get_learning_stats",
+            Request::GetTimeSlotRecommendation { .. } => "get_time_slot_recommendation",
             Request::GetDaemonStatus => "get_daemon_status",
             Request::Replan => "replan",
         }

@@ -37,12 +37,56 @@ pub enum Response {
     RankedTasks {
         tasks: Vec<RankedTask>,
     },
+
+    LearningStats {
+        stats: LearningStatsData,
+    },
+
+    TimeSlotRecommendation {
+        task_id: String,
+        task_type: String,
+        recommended_slot: String,
+        confidence: f64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RankedTask {
     pub task: Task,
     pub score: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LearningStatsData {
+    pub total_tasks_learned: u32,
+    pub task_type_stats: Vec<TaskTypeStatsData>,
+    pub time_slot_stats: TimeSlotStatsData,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskTypeStatsData {
+    pub task_type: String,
+    pub total_scheduled: u32,
+    pub total_completed: u32,
+    pub total_postponed: u32,
+    pub completion_rate: f64,
+    pub best_time_slot: String,
+    pub avg_duration_minutes: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeSlotStatsData {
+    pub morning: TimeSlotDetail,
+    pub afternoon: TimeSlotDetail,
+    pub evening: TimeSlotDetail,
+    pub night: TimeSlotDetail,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeSlotDetail {
+    pub successes: u32,
+    pub failures: u32,
+    pub success_rate: f64,
 }
 
 impl Response {

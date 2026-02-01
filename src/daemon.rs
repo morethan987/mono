@@ -85,7 +85,7 @@ async fn run_daemon_main(paths: &MonoPaths) -> Result<()> {
     run_migrations(&pool).await?;
 
     let storage = SqliteStorage::new(pool);
-    let mut daemon_state = DaemonState::new(storage, paths.clone(), settings);
+    let mut daemon_state = DaemonState::new(storage, paths.clone(), settings).await;
 
     daemon_state.init_notification_backend().await;
 

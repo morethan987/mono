@@ -51,6 +51,9 @@ pub enum Commands {
     #[command(about = "重新规划日程")]
     Replan,
 
+    #[command(about = "查看学习统计")]
+    Stats(StatsArgs),
+
     #[command(about = "配置管理")]
     Config {
         #[command(subcommand)]
@@ -113,6 +116,9 @@ pub struct CompleteArgs {
 
     #[arg(short, long, help = "实际用时（分钟）")]
     pub time: Option<u32>,
+
+    #[arg(short, long, help = "跳过反馈提示")]
+    pub skip_feedback: bool,
 }
 
 #[derive(Args)]
@@ -128,6 +134,18 @@ pub struct PostponeArgs {
 pub struct FeedbackArgs {
     #[arg(help = "任务 ID（可使用短 ID）")]
     pub id: String,
+
+    #[arg(short, long, help = "满意度评分 (1-5)")]
+    pub rating: Option<u8>,
+
+    #[arg(short, long, help = "难度评分 (1-5)")]
+    pub difficulty: Option<u8>,
+
+    #[arg(short, long, help = "精力水平 (1-5)")]
+    pub energy: Option<u8>,
+
+    #[arg(short, long, help = "备注")]
+    pub notes: Option<String>,
 }
 
 #[derive(Args)]
@@ -137,6 +155,15 @@ pub struct DeleteArgs {
 
     #[arg(short, long, help = "跳过确认")]
     pub force: bool,
+}
+
+#[derive(Args)]
+pub struct StatsArgs {
+    #[arg(short, long, help = "只显示特定任务类型的统计")]
+    pub task_type: Option<String>,
+
+    #[arg(short, long, help = "显示详细信息")]
+    pub verbose: bool,
 }
 
 #[derive(Args)]

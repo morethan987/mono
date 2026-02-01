@@ -5,7 +5,7 @@ mod display;
 pub use client::DaemonClient;
 pub use commands::{
     AddArgs, Cli, CliPriority, Commands, CompleteArgs, ConfigAction, DaemonAction, DeleteArgs,
-    FeedbackArgs, ListArgs, PostponeArgs, UpdateArgs, parse_deadline,
+    FeedbackArgs, ListArgs, PostponeArgs, StatsArgs, UpdateArgs, parse_deadline,
 };
 pub use display::{
     format_ranked_task_list, format_task_detail, format_task_list, format_task_short, print_error,

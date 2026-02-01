@@ -7,7 +7,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::daemon::DaemonState;
 use crate::error::{MonoError, Result};
-use crate::models::{Priority, Task, TaskStatus};
+use crate::models::{Feedback, Priority, Task, TaskStatus};
 use crate::protocol::{Request, Response, decode_request, encode_response};
 use crate::storage::TaskRepository;
 
@@ -202,7 +202,18 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
                     task.actual_minutes = actual_minutes;
                     task.updated_at = Utc::now();
                     match state.storage.update(&task).await {
-                        Ok(()) => Response::task(task),
+                        Ok(()) => {
+                            let feedback = Feedback::completed(
+                                task.id.clone(),
+                                actual_minutes.unwrap_or(0),
+                            );
+                            let mut lm = state.learning_manager.write().await;
+                            lm.update_from_feedback(&task, &feedback);
+                            drop(lm);
+                            state.maybe_save_learning_model().await;
+                            debug!("Updated learning model for completed task: {}", task.short_id());
+                            Response::task(task)
+                        }
                         Err(e) => Response::error(format!("Failed to complete task: {}", e)),
                     }
                 }
@@ -219,7 +230,15 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
                 }
                 task.updated_at = Utc::now();
                 match state.storage.update(&task).await {
-                    Ok(()) => Response::task(task),
+                    Ok(()) => {
+                        let feedback = Feedback::postponed(task.id.clone(), minutes);
+                        let mut lm = state.learning_manager.write().await;
+                        lm.update_from_feedback(&task, &feedback);
+                        drop(lm);
+                        state.maybe_save_learning_model().await;
+                        debug!("Updated learning model for postponed task: {}", task.short_id());
+                        Response::task(task)
+                    }
                     Err(e) => Response::error(format!("Failed to postpone task: {}", e)),
                 }
             }
@@ -310,5 +329,109 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
             }
             Err(e) => Response::error(format!("Failed to replan: {}", e)),
         },
+
+        Request::SubmitFeedback {
+            task_id,
+            rating,
+            difficulty,
+            energy_level,
+            notes,
+        } => match state.storage.get_by_short_id(&task_id).await {
+            Ok(Some(task)) => {
+                let mut feedback = Feedback::new(task.id.clone(), crate::models::FeedbackType::Completed);
+                feedback.rating = rating;
+                feedback.difficulty_rating = difficulty;
+                feedback.energy_level = energy_level;
+                feedback.notes = notes;
+
+                let mut lm = state.learning_manager.write().await;
+                lm.update_from_feedback(&task, &feedback);
+                drop(lm);
+                state.maybe_save_learning_model().await;
+                debug!("Submitted detailed feedback for task: {}", task.short_id());
+                Response::ok()
+            }
+            Ok(None) => Response::error(format!("Task not found: {}", task_id)),
+            Err(e) => Response::error(format!("Database error: {}", e)),
+        },
+
+        Request::GetLearningStats { task_type } => {
+            let lm = state.learning_manager.read().await;
+
+            let task_type_stats: Vec<crate::protocol::TaskTypeStatsData> = if let Some(ref tt) = task_type {
+                lm.get_model(tt)
+                    .map(|m| vec![model_to_stats_data(m)])
+                    .unwrap_or_default()
+            } else {
+                lm.all_models()
+                    .map(|(_, m)| model_to_stats_data(m))
+                    .collect()
+            };
+
+            let global = lm.global_stats();
+            let time_slot_stats = bandit_to_time_slot_stats(&global.time_slot_bandit);
+
+            Response::LearningStats {
+                stats: crate::protocol::LearningStatsData {
+                    total_tasks_learned: global.total_tasks,
+                    task_type_stats,
+                    time_slot_stats,
+                },
+            }
+        }
+
+        Request::GetTimeSlotRecommendation { task_id } => {
+            match state.storage.get_by_short_id(&task_id).await {
+                Ok(Some(task)) => {
+                    let lm = state.learning_manager.read().await;
+                    let task_type = task.task_type();
+                    let recommended = lm.suggest_time_slot(&task);
+                    let confidence = lm
+                        .get_model(&task_type.name)
+                        .map(|m| (m.total_scheduled as f64 / 10.0).min(1.0))
+                        .unwrap_or(0.0);
+                    Response::TimeSlotRecommendation {
+                        task_id: task.short_id().to_string(),
+                        task_type: task_type.name,
+                        recommended_slot: recommended.to_string(),
+                        confidence,
+                    }
+                }
+                Ok(None) => Response::error(format!("Task not found: {}", task_id)),
+                Err(e) => Response::error(format!("Database error: {}", e)),
+            }
+        }
+    }
+}
+
+fn model_to_stats_data(model: &crate::learning::TaskTypeLearningModel) -> crate::protocol::TaskTypeStatsData {
+    crate::protocol::TaskTypeStatsData {
+        task_type: model.task_type.name.clone(),
+        total_scheduled: model.total_scheduled,
+        total_completed: model.total_completed,
+        total_postponed: model.total_postponed,
+        completion_rate: model.completion_rate(),
+        best_time_slot: format!("{:?}", model.best_time_slot()),
+        avg_duration_minutes: model.avg_duration_minutes,
+    }
+}
+
+fn bandit_to_time_slot_stats(bandit: &crate::learning::TimeSlotBandit) -> crate::protocol::TimeSlotStatsData {
+    use crate::learning::TimeSlotArm;
+
+    let slot_detail = |arm: TimeSlotArm| {
+        let stats = bandit.get_stats(arm);
+        crate::protocol::TimeSlotDetail {
+            successes: (stats.successes - 1.0).max(0.0) as u32,
+            failures: (stats.failures - 1.0).max(0.0) as u32,
+            success_rate: stats.success_rate(),
+        }
+    };
+
+    crate::protocol::TimeSlotStatsData {
+        morning: slot_detail(TimeSlotArm::Morning),
+        afternoon: slot_detail(TimeSlotArm::Afternoon),
+        evening: slot_detail(TimeSlotArm::Evening),
+        night: slot_detail(TimeSlotArm::Night),
     }
 }
