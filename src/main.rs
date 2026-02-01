@@ -3,6 +3,7 @@ mod config;
 mod daemon;
 mod error;
 mod models;
+mod notification;
 mod platform;
 mod protocol;
 mod scheduling;

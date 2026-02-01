@@ -178,6 +178,27 @@ impl TaskRepository for SqliteStorage {
         Ok(rows.iter().map(row_to_task).collect())
     }
 
+    async fn list_ready_for_notification(&self) -> Result<Vec<Task>> {
+        let now = format_datetime(&Utc::now());
+        let rows = sqlx::query(
+            r#"
+            SELECT id, title, description, priority, status, tags,
+                   estimated_minutes, actual_minutes, deadline, scheduled_at,
+                   started_at, completed_at, created_at, updated_at
+            FROM tasks
+            WHERE status = 'pending'
+              AND (scheduled_at IS NULL OR scheduled_at <= ?)
+            ORDER BY priority DESC, deadline ASC
+            LIMIT 1
+            "#,
+        )
+        .bind(&now)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(row_to_task).collect())
+    }
+
     async fn update(&self, task: &Task) -> Result<()> {
         let result = sqlx::query(
             r#"

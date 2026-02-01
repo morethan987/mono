@@ -85,7 +85,11 @@ async fn run_daemon_main(paths: &MonoPaths) -> Result<()> {
     run_migrations(&pool).await?;
 
     let storage = SqliteStorage::new(pool);
-    let state = Arc::new(DaemonState::new(storage, paths.clone(), settings));
+    let mut daemon_state = DaemonState::new(storage, paths.clone(), settings);
+
+    daemon_state.init_notification_backend().await;
+
+    let state = Arc::new(daemon_state);
 
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
