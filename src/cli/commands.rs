@@ -52,7 +52,10 @@ pub enum Commands {
     Replan,
 
     #[command(about = "查看学习统计")]
-    Stats(StatsArgs),
+    Stats {
+        #[command(subcommand)]
+        action: Option<StatsAction>,
+    },
 
     #[command(about = "配置管理")]
     Config {
@@ -158,15 +161,6 @@ pub struct DeleteArgs {
 }
 
 #[derive(Args)]
-pub struct StatsArgs {
-    #[arg(short, long, help = "只显示特定任务类型的统计")]
-    pub task_type: Option<String>,
-
-    #[arg(short, long, help = "显示详细信息")]
-    pub verbose: bool,
-}
-
-#[derive(Args)]
 pub struct UpdateArgs {
     #[arg(help = "任务 ID（可使用短 ID）")]
     pub id: String,
@@ -200,6 +194,60 @@ pub enum ConfigAction {
 
     #[command(about = "初始化配置文件")]
     Init,
+}
+
+#[derive(Subcommand)]
+pub enum StatsAction {
+    #[command(about = "查看学习统计（默认）")]
+    Show {
+        #[arg(short, long, help = "只显示特定任务类型的统计")]
+        task_type: Option<String>,
+
+        #[arg(short, long, help = "显示详细信息")]
+        verbose: bool,
+    },
+
+    #[command(about = "重置学习数据")]
+    Reset {
+        #[arg(short, long, help = "重置特定任务类型（不指定则重置全部）")]
+        task_type: Option<String>,
+
+        #[arg(short, long, help = "跳过确认")]
+        force: bool,
+    },
+
+    #[command(about = "设置时段偏好（减少冷启动时间）")]
+    SetPreference {
+        #[arg(help = "任务类型 (work/study/exercise/default 等)")]
+        task_type: String,
+
+        #[arg(help = "偏好时段 (morning/afternoon/evening/night)")]
+        time_slot: String,
+
+        #[arg(short, long, default_value = "5", help = "偏好强度 (1-10)")]
+        strength: u32,
+    },
+
+    #[command(about = "导出学习数据为 JSON")]
+    Export {
+        #[arg(short, long, help = "输出文件路径（默认输出到 stdout）")]
+        output: Option<String>,
+    },
+
+    #[command(about = "从 JSON 导入学习数据")]
+    Import {
+        #[arg(help = "JSON 文件路径")]
+        file: String,
+
+        #[arg(short, long, help = "合并而非覆盖现有数据")]
+        merge: bool,
+    },
+
+    #[command(about = "显示详细的模型参数")]
+    Inspect {
+        #[arg(short, long, help = "检查特定任务类型")]
+        task_type: Option<String>,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]

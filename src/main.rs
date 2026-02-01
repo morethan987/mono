@@ -1,3 +1,6 @@
+// Allow dead code during development - many features are staged for future use
+#![allow(dead_code)]
+
 mod cli;
 mod config;
 mod daemon;
@@ -14,7 +17,7 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::{
-    Cli, Commands, ConfigAction, DaemonAction, DaemonClient, format_ranked_task_list,
+    Cli, Commands, ConfigAction, DaemonAction, DaemonClient, StatsAction, format_ranked_task_list,
     format_task_detail, format_task_list, parse_deadline, print_error, print_info, print_success,
     print_warning,
 };
@@ -22,6 +25,8 @@ use crate::config::{MonoPaths, Settings};
 use crate::daemon::{daemon_status, run_daemon_background, run_daemon_foreground, stop_daemon};
 use crate::models::TaskStatus;
 use crate::protocol::{Request, Response, TimeSlotDetail};
+use owo_colors::OwoColorize;
+use tabled::{Table, Tabled, settings::Style};
 
 fn main() {
     let cli = Cli::parse();
@@ -84,7 +89,7 @@ async fn run(cli: Cli) -> error::Result<()> {
         Commands::Update(args) => handle_update(args, &paths).await,
         Commands::Feedback(args) => handle_feedback(args, &paths).await,
         Commands::Replan => handle_replan(&paths).await,
-        Commands::Stats(args) => handle_stats(args, &paths).await,
+        Commands::Stats { action } => handle_stats(action, &paths).await,
         Commands::Config { action } => handle_config(action, &paths),
     }
 }
@@ -114,16 +119,14 @@ async fn handle_daemon(action: DaemonAction, paths: &MonoPaths) -> error::Result
                     let settings = Settings::load(&paths.config_file()).unwrap_or_default();
                     if let Ok(mut client) =
                         DaemonClient::connect(&paths.socket, settings.daemon.ipc_timeout_secs).await
-                    {
-                        if let Ok(Response::DaemonStatus {
+                        && let Ok(Response::DaemonStatus {
                             uptime_secs,
                             task_count,
                             ..
                         }) = client.request(Request::GetDaemonStatus).await
-                        {
-                            println!("  运行时间: {}s", uptime_secs);
-                            println!("  任务数量: {}", task_count);
-                        }
+                    {
+                        println!("  运行时间: {}s", uptime_secs);
+                        println!("  任务数量: {}", task_count);
                     }
                 }
                 None => {
@@ -210,7 +213,7 @@ async fn handle_now(paths: &MonoPaths) -> error::Result<()> {
         Response::CurrentTask { task: Some(task) } => {
             println!("\n📌 现在应该做:\n");
             println!("{}", format_task_detail(&task));
-            
+
             let rec_response = client
                 .request(Request::GetTimeSlotRecommendation {
                     task_id: task.short_id().to_string(),
@@ -221,10 +224,13 @@ async fn handle_now(paths: &MonoPaths) -> error::Result<()> {
                 confidence,
                 ..
             } = rec_response
+                && confidence > 0.3
             {
-                if confidence > 0.3 {
-                    println!("\n💡 推荐时段: {} (置信度: {:.0}%)", recommended_slot, confidence * 100.0);
-                }
+                println!(
+                    "\n💡 推荐时段: {} (置信度: {:.0}%)",
+                    recommended_slot,
+                    confidence * 100.0
+                );
             }
         }
         Response::CurrentTask { task: None } => {
@@ -361,11 +367,9 @@ fn prompt_for_feedback() -> Option<QuickFeedback> {
         .next()
         .and_then(|r| r.ok())
         .and_then(|s| s.trim().parse::<u8>().ok())
-        .filter(|&r| r >= 1 && r <= 5);
+        .filter(|&r| (1..=5).contains(&r));
 
-    if rating.is_none() {
-        return None;
-    }
+    rating?;
 
     print!("难度 (1=容易, 5=困难)? ");
     std::io::stdout().flush().ok();
@@ -373,7 +377,7 @@ fn prompt_for_feedback() -> Option<QuickFeedback> {
         .next()
         .and_then(|r| r.ok())
         .and_then(|s| s.trim().parse::<u8>().ok())
-        .filter(|&d| d >= 1 && d <= 5);
+        .filter(|&d| (1..=5).contains(&d));
 
     print!("当前精力 (1=疲惫, 5=充沛)? ");
     std::io::stdout().flush().ok();
@@ -381,7 +385,7 @@ fn prompt_for_feedback() -> Option<QuickFeedback> {
         .next()
         .and_then(|r| r.ok())
         .and_then(|s| s.trim().parse::<u8>().ok())
-        .filter(|&e| e >= 1 && e <= 5);
+        .filter(|&e| (1..=5).contains(&e));
 
     Some(QuickFeedback {
         rating,
@@ -543,55 +547,250 @@ async fn handle_feedback(args: cli::FeedbackArgs, paths: &MonoPaths) -> error::R
     Ok(())
 }
 
-async fn handle_stats(args: cli::StatsArgs, paths: &MonoPaths) -> error::Result<()> {
+async fn handle_stats(action: Option<StatsAction>, paths: &MonoPaths) -> error::Result<()> {
     let settings = Settings::load(&paths.config_file()).unwrap_or_default();
     let mut client = DaemonClient::connect(&paths.socket, settings.daemon.ipc_timeout_secs).await?;
 
+    let action = action.unwrap_or(StatsAction::Show {
+        task_type: None,
+        verbose: false,
+    });
+
+    match action {
+        StatsAction::Show { task_type, verbose } => {
+            handle_stats_show(&mut client, task_type, verbose).await
+        }
+        StatsAction::Reset { task_type, force } => {
+            if !force {
+                let target = task_type
+                    .as_ref()
+                    .map(|t| format!("任务类型 '{}'", t))
+                    .unwrap_or_else(|| "全部".to_string());
+                print!("确定要重置 {} 的学习数据吗? [y/N] ", target);
+                use std::io::Write;
+                std::io::stdout().flush().ok();
+
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input).ok();
+
+                if !input.trim().eq_ignore_ascii_case("y") {
+                    print_info("已取消");
+                    return Ok(());
+                }
+            }
+
+            let response = client
+                .request(Request::ResetLearningData {
+                    task_type: task_type.clone(),
+                })
+                .await?;
+            match response {
+                Response::Ok => {
+                    let target = task_type
+                        .map(|t| format!("任务类型 '{}' 的", t))
+                        .unwrap_or_else(|| "全部".to_string());
+                    print_success(&format!("{}学习数据已重置", target));
+                }
+                Response::Error { message } => print_error(&message),
+                _ => print_error("意外的响应"),
+            }
+            Ok(())
+        }
+
+        StatsAction::SetPreference {
+            task_type,
+            time_slot,
+            strength,
+        } => {
+            let response = client
+                .request(Request::SetTimeSlotPreference {
+                    task_type: task_type.clone(),
+                    time_slot: time_slot.clone(),
+                    strength,
+                })
+                .await?;
+
+            match response {
+                Response::Ok => {
+                    let slot_display = format_best_time_slot(
+                        &time_slot
+                            .to_lowercase()
+                            .replace("morning", "Morning")
+                            .replace("afternoon", "Afternoon")
+                            .replace("evening", "Evening")
+                            .replace("night", "Night"),
+                    );
+                    print_success(&format!(
+                        "已设置 '{}' 的偏好时段为 {} (强度: {})",
+                        task_type, slot_display, strength
+                    ));
+                    println!();
+                    println!(
+                        "{}",
+                        "💡 偏好已生效，系统将在该时段优先推荐此类任务".dimmed()
+                    );
+                }
+                Response::Error { message } => print_error(&message),
+                _ => print_error("意外的响应"),
+            }
+            Ok(())
+        }
+
+        StatsAction::Export { output } => {
+            let response = client.request(Request::ExportLearningData).await?;
+            match response {
+                Response::LearningDataExport { data } => {
+                    if let Some(path) = output {
+                        std::fs::write(&path, &data)?;
+                        print_success(&format!("学习数据已导出到: {}", path));
+                    } else {
+                        println!("{}", data);
+                    }
+                }
+                Response::Error { message } => print_error(&message),
+                _ => print_error("意外的响应"),
+            }
+            Ok(())
+        }
+
+        StatsAction::Import { file, merge } => {
+            let data = std::fs::read_to_string(&file)?;
+            let response = client
+                .request(Request::ImportLearningData { data, merge })
+                .await?;
+
+            match response {
+                Response::Ok => {
+                    let mode = if merge { "合并" } else { "覆盖" };
+                    print_success(&format!("学习数据已从 '{}' {} 导入", file, mode));
+                }
+                Response::Error { message } => print_error(&message),
+                _ => print_error("意外的响应"),
+            }
+            Ok(())
+        }
+
+        StatsAction::Inspect { task_type } => {
+            let response = client
+                .request(Request::InspectLearningModel { task_type })
+                .await?;
+
+            match response {
+                Response::LearningModelInspection {
+                    global_stats,
+                    task_type_models,
+                } => {
+                    println!("\n{}\n", "🔍 学习模型检查".bold());
+
+                    println!("{}", "全局模型".bold().underline());
+                    println!(
+                        "  总任务数: {}",
+                        global_stats.total_tasks.to_string().green()
+                    );
+                    println!("  FTRL 权重数: {}", global_stats.ftrl_weights_count);
+                    println!();
+
+                    println!("  {}", "全局时段统计:".dimmed());
+                    let global_time_rows = vec![
+                        TimeSlotRow::new("早晨", &global_stats.time_slots.morning),
+                        TimeSlotRow::new("下午", &global_stats.time_slots.afternoon),
+                        TimeSlotRow::new("傍晚", &global_stats.time_slots.evening),
+                        TimeSlotRow::new("夜间", &global_stats.time_slots.night),
+                    ];
+                    println!("{}\n", Table::new(global_time_rows).with(Style::rounded()));
+
+                    if task_type_models.is_empty() {
+                        print_info("暂无任务类型模型");
+                    } else {
+                        for model in task_type_models {
+                            println!(
+                                "{}",
+                                format!("📋 任务类型: {}", model.task_type)
+                                    .bold()
+                                    .underline()
+                            );
+                            println!("  总调度: {}", model.total_scheduled);
+                            println!(
+                                "  已完成: {} ({}%)",
+                                model.total_completed,
+                                if model.total_scheduled > 0 {
+                                    (model.total_completed as f64 / model.total_scheduled as f64
+                                        * 100.0) as u32
+                                } else {
+                                    0
+                                }
+                            );
+                            println!("  已推迟: {}", model.total_postponed);
+                            println!("  已跳过: {}", model.total_skipped);
+                            if let Some(avg) = model.avg_duration_minutes {
+                                println!("  平均时长: {:.0} 分钟", avg);
+                            }
+                            println!("  FTRL 权重数: {}", model.ftrl_weights_count);
+                            println!();
+
+                            println!("  {}", "类型专属时段统计:".dimmed());
+                            let type_time_rows = vec![
+                                TimeSlotRow::new("早晨", &model.time_slots.morning),
+                                TimeSlotRow::new("下午", &model.time_slots.afternoon),
+                                TimeSlotRow::new("傍晚", &model.time_slots.evening),
+                                TimeSlotRow::new("夜间", &model.time_slots.night),
+                            ];
+                            println!("{}\n", Table::new(type_time_rows).with(Style::rounded()));
+                        }
+                    }
+                }
+                Response::Error { message } => print_error(&message),
+                _ => print_error("意外的响应"),
+            }
+            Ok(())
+        }
+    }
+}
+
+async fn handle_stats_show(
+    client: &mut DaemonClient,
+    task_type: Option<String>,
+    verbose: bool,
+) -> error::Result<()> {
     let response = client
-        .request(Request::GetLearningStats {
-            task_type: args.task_type,
-        })
+        .request(Request::GetLearningStats { task_type })
         .await?;
 
     match response {
         Response::LearningStats { stats } => {
-            println!("\n📊 学习统计\n");
-            println!("总学习任务数: {}", stats.total_tasks_learned);
-            println!();
+            println!("\n{}\n", "📊 学习统计".bold());
+            println!(
+                "总学习样本: {}\n",
+                stats.total_tasks_learned.to_string().green()
+            );
 
             if stats.task_type_stats.is_empty() {
                 print_info("暂无任务类型统计数据，完成更多任务后将显示学习成果");
+                println!();
+                println!("{}", "💡 提示: 使用 'mono stats manage set-preference' 可以手动设置时段偏好来减少冷启动时间".dimmed());
             } else {
-                println!("📋 任务类型统计:");
-                println!("{}", "─".repeat(60));
-                for ts in &stats.task_type_stats {
-                    println!(
-                        "  {} [{}]",
-                        ts.task_type,
-                        format_best_time_slot(&ts.best_time_slot)
-                    );
-                    println!(
-                        "    调度: {} | 完成: {} | 推迟: {} | 完成率: {:.1}%",
-                        ts.total_scheduled,
-                        ts.total_completed,
-                        ts.total_postponed,
-                        ts.completion_rate * 100.0
-                    );
-                    if let Some(avg) = ts.avg_duration_minutes {
-                        println!("    平均用时: {:.0} 分钟", avg);
-                    }
-                    println!();
-                }
+                println!("{}\n", "📌 任务类型统计".bold());
+
+                let task_type_rows: Vec<TaskTypeStatsRow> = stats
+                    .task_type_stats
+                    .iter()
+                    .map(TaskTypeStatsRow::from)
+                    .collect();
+
+                println!("{}\n", Table::new(task_type_rows).with(Style::rounded()));
             }
 
-            if args.verbose {
-                println!("⏰ 时段成功率:");
-                println!("{}", "─".repeat(60));
-                print_time_slot_bar("  🌅 早晨 (6-12)", &stats.time_slot_stats.morning);
-                print_time_slot_bar("  ☀️ 下午 (12-18)", &stats.time_slot_stats.afternoon);
-                print_time_slot_bar("  🌆 傍晚 (18-22)", &stats.time_slot_stats.evening);
-                print_time_slot_bar("  🌙 夜间 (22-6)", &stats.time_slot_stats.night);
-                println!();
+            if verbose {
+                println!("{}\n", "⏰ 时段成功率".bold());
+
+                let time_slot_rows = vec![
+                    TimeSlotRow::new("早晨 (6-12)", &stats.time_slot_stats.morning),
+                    TimeSlotRow::new("下午 (12-18)", &stats.time_slot_stats.afternoon),
+                    TimeSlotRow::new("傍晚 (18-22)", &stats.time_slot_stats.evening),
+                    TimeSlotRow::new("夜间 (22-6)", &stats.time_slot_stats.night),
+                ];
+
+                println!("{}\n", Table::new(time_slot_rows).with(Style::rounded()));
             }
         }
         Response::Error { message } => {
@@ -605,35 +804,119 @@ async fn handle_stats(args: cli::StatsArgs, paths: &MonoPaths) -> error::Result<
     Ok(())
 }
 
-fn format_best_time_slot(slot: &str) -> &'static str {
-    match slot {
-        "Morning" => "最佳: 早晨",
-        "Afternoon" => "最佳: 下午",
-        "Evening" => "最佳: 傍晚",
-        "Night" => "最佳: 夜间",
-        _ => "探索中",
+#[derive(Tabled)]
+struct TaskTypeStatsRow {
+    #[tabled(rename = "类型")]
+    task_type: String,
+    #[tabled(rename = "已调度")]
+    total_scheduled: String,
+    #[tabled(rename = "已完成")]
+    total_completed: String,
+    #[tabled(rename = "已推迟")]
+    total_postponed: String,
+    #[tabled(rename = "完成率")]
+    completion_rate: String,
+    #[tabled(rename = "最佳时段")]
+    best_time_slot: String,
+    #[tabled(rename = "平均时长")]
+    avg_duration: String,
+}
+
+impl From<&protocol::TaskTypeStatsData> for TaskTypeStatsRow {
+    fn from(stats: &protocol::TaskTypeStatsData) -> Self {
+        let completion_rate_value = stats.completion_rate * 100.0;
+        let completion_rate_str = format!("{:.1}%", completion_rate_value);
+        let completion_rate_colored = if completion_rate_value >= 80.0 {
+            completion_rate_str.green().to_string()
+        } else if completion_rate_value >= 60.0 {
+            completion_rate_str.yellow().to_string()
+        } else {
+            completion_rate_str.red().to_string()
+        };
+
+        Self {
+            task_type: stats.task_type.clone().bold().to_string(),
+            total_scheduled: stats.total_scheduled.to_string(),
+            total_completed: stats.total_completed.to_string().green().to_string(),
+            total_postponed: if stats.total_postponed > 0 {
+                stats.total_postponed.to_string().yellow().to_string()
+            } else {
+                stats.total_postponed.to_string()
+            },
+            completion_rate: completion_rate_colored,
+            best_time_slot: format_best_time_slot(&stats.best_time_slot),
+            avg_duration: stats
+                .avg_duration_minutes
+                .map(|d| format!("{:.0}分钟", d))
+                .unwrap_or_else(|| "-".to_string()),
+        }
     }
 }
 
-fn print_time_slot_bar(label: &str, detail: &TimeSlotDetail) {
-    let total = detail.successes + detail.failures;
-    let bar_width = 20;
-    let filled = if total > 0 {
-        ((detail.success_rate * bar_width as f64) as usize).min(bar_width)
-    } else {
-        0
-    };
-    let empty = bar_width - filled;
+#[derive(Tabled)]
+struct TimeSlotRow {
+    #[tabled(rename = "时段")]
+    time_slot: String,
+    #[tabled(rename = "成功")]
+    successes: String,
+    #[tabled(rename = "失败")]
+    failures: String,
+    #[tabled(rename = "总计")]
+    total: String,
+    #[tabled(rename = "成功率")]
+    success_rate: String,
+    #[tabled(rename = "进度条")]
+    bar: String,
+}
 
-    println!(
-        "{}: [{}{}] {:.0}% ({}/{})",
-        label,
-        "█".repeat(filled),
-        "░".repeat(empty),
-        detail.success_rate * 100.0,
-        detail.successes,
-        total
-    );
+impl TimeSlotRow {
+    fn new(label: &str, detail: &TimeSlotDetail) -> Self {
+        let total = detail.successes + detail.failures;
+        let bar_width = 20;
+        let filled = if total > 0 {
+            ((detail.success_rate * bar_width as f64) as usize).min(bar_width)
+        } else {
+            0
+        };
+        let empty = bar_width - filled;
+
+        let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
+        let success_rate_value = detail.success_rate * 100.0;
+        let success_rate_str = format!("{:.1}%", success_rate_value);
+        let success_rate_colored = if success_rate_value >= 80.0 {
+            success_rate_str.green().to_string()
+        } else if success_rate_value >= 60.0 {
+            success_rate_str.yellow().to_string()
+        } else if success_rate_value > 0.0 {
+            success_rate_str.red().to_string()
+        } else {
+            success_rate_str.dimmed().to_string()
+        };
+
+        Self {
+            time_slot: label.to_string(),
+            successes: detail.successes.to_string().green().to_string(),
+            failures: if detail.failures > 0 {
+                detail.failures.to_string().red().to_string()
+            } else {
+                detail.failures.to_string().dimmed().to_string()
+            },
+            total: total.to_string(),
+            success_rate: success_rate_colored,
+            bar,
+        }
+    }
+}
+
+fn format_best_time_slot(slot: &str) -> String {
+    let text = match slot {
+        "Morning" => "早晨",
+        "Afternoon" => "下午",
+        "Evening" => "傍晚",
+        "Night" => "夜间",
+        _ => "探索中",
+    };
+    format!("{}", text)
 }
 
 fn handle_config(action: Option<ConfigAction>, paths: &MonoPaths) -> error::Result<()> {

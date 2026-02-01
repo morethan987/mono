@@ -81,6 +81,10 @@ impl TaskTypeLearningModel {
             self.time_slot_bandit.select_arm_greedy()
         }
     }
+
+    pub fn ftrl_weights_count(&self) -> usize {
+        self.ftrl_model.weights_count()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -195,10 +199,10 @@ impl LearningManager {
     pub fn suggest_time_slot(&self, task: &Task) -> TimeSlotArm {
         let task_type = task.task_type();
 
-        if let Some(model) = self.models.get(&task_type.name) {
-            if model.total_scheduled >= self.cold_start_threshold {
-                return model.best_time_slot();
-            }
+        if let Some(model) = self.models.get(&task_type.name)
+            && model.total_scheduled >= self.cold_start_threshold
+        {
+            return model.best_time_slot();
         }
 
         self.global_model.time_slot_bandit.select_arm()
@@ -241,13 +245,65 @@ impl LearningManager {
     pub fn time_slot_success_rate(&self, task: &Task, arm: TimeSlotArm) -> f64 {
         let task_type = task.task_type();
 
-        if let Some(model) = self.models.get(&task_type.name) {
-            if model.total_scheduled >= 5 {
-                return model.time_slot_bandit.success_rate(arm);
-            }
+        if let Some(model) = self.models.get(&task_type.name)
+            && model.total_scheduled >= 5
+        {
+            return model.time_slot_bandit.success_rate(arm);
         }
 
         self.global_model.time_slot_bandit.success_rate(arm)
+    }
+
+    pub fn reset(&mut self, task_type: Option<&str>) {
+        match task_type {
+            Some(tt) => {
+                self.models.remove(tt);
+            }
+            None => {
+                self.models.clear();
+                self.global_model = GlobalLearningModel::new();
+            }
+        }
+    }
+
+    pub fn set_time_slot_preference(&mut self, task_type: &str, arm: TimeSlotArm, strength: u32) {
+        let task_type_obj = TaskType::new(task_type);
+        let model = self
+            .models
+            .entry(task_type.to_string())
+            .or_insert_with(|| TaskTypeLearningModel::new(task_type_obj));
+
+        let strength = strength.min(10) as f64;
+        for _ in 0..strength as u32 {
+            model.time_slot_bandit.update(arm, true);
+            model.total_scheduled += 1;
+            model.total_completed += 1;
+        }
+
+        for _ in 0..strength as u32 {
+            self.global_model.time_slot_bandit.update(arm, true);
+            self.global_model.total_tasks += 1;
+        }
+    }
+
+    pub fn import_state(&mut self, state: LearningManagerState, merge: bool) {
+        if merge {
+            for (key, model) in state.models {
+                self.models.insert(key, model);
+            }
+            self.global_model.total_tasks += state.global_model.total_tasks;
+        } else {
+            self.models = state.models;
+            self.global_model = state.global_model;
+        }
+    }
+
+    pub fn get_global_ftrl_weights_count(&self) -> usize {
+        self.global_model.ftrl_model.weights_count()
+    }
+
+    pub fn task_type_names(&self) -> Vec<String> {
+        self.models.keys().cloned().collect()
     }
 }
 

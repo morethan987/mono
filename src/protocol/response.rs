@@ -48,6 +48,15 @@ pub enum Response {
         recommended_slot: String,
         confidence: f64,
     },
+
+    LearningDataExport {
+        data: String,
+    },
+
+    LearningModelInspection {
+        global_stats: GlobalModelStats,
+        task_type_models: Vec<TaskTypeModelStats>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,6 +96,27 @@ pub struct TimeSlotDetail {
     pub successes: u32,
     pub failures: u32,
     pub success_rate: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GlobalModelStats {
+    pub total_tasks: u32,
+    pub time_slots: TimeSlotStatsData,
+    pub ftrl_weights_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskTypeModelStats {
+    pub task_type: String,
+    pub total_scheduled: u32,
+    pub total_completed: u32,
+    pub total_postponed: u32,
+    pub total_skipped: u32,
+    pub completion_rate: f64,
+    pub best_time_slot: String,
+    pub time_slots: TimeSlotStatsData,
+    pub avg_duration_minutes: Option<f64>,
+    pub ftrl_weights_count: usize,
 }
 
 impl Response {

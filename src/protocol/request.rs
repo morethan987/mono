@@ -76,6 +76,27 @@ pub enum Request {
         task_id: String,
     },
 
+    ResetLearningData {
+        task_type: Option<String>,
+    },
+
+    SetTimeSlotPreference {
+        task_type: String,
+        time_slot: String,
+        strength: u32,
+    },
+
+    ExportLearningData,
+
+    ImportLearningData {
+        data: String,
+        merge: bool,
+    },
+
+    InspectLearningModel {
+        task_type: Option<String>,
+    },
+
     GetDaemonStatus,
 
     Replan,
@@ -99,6 +120,11 @@ impl Request {
             Request::SubmitFeedback { .. } => "submit_feedback",
             Request::GetLearningStats { .. } => "get_learning_stats",
             Request::GetTimeSlotRecommendation { .. } => "get_time_slot_recommendation",
+            Request::ResetLearningData { .. } => "reset_learning_data",
+            Request::SetTimeSlotPreference { .. } => "set_time_slot_preference",
+            Request::ExportLearningData => "export_learning_data",
+            Request::ImportLearningData { .. } => "import_learning_data",
+            Request::InspectLearningModel { .. } => "inspect_learning_model",
             Request::GetDaemonStatus => "get_daemon_status",
             Request::Replan => "replan",
         }

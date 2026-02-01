@@ -30,7 +30,7 @@ impl DaemonServer {
                 .map_err(|e| MonoError::Platform(format!("Failed to remove old socket: {}", e)))?;
         }
 
-        let listener = UnixListener::bind(socket_path).map_err(|e| MonoError::IpcConnection(e))?;
+        let listener = UnixListener::bind(socket_path).map_err(MonoError::IpcConnection)?;
 
         info!("Daemon server listening on {:?}", socket_path);
 
@@ -203,15 +203,16 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
                     task.updated_at = Utc::now();
                     match state.storage.update(&task).await {
                         Ok(()) => {
-                            let feedback = Feedback::completed(
-                                task.id.clone(),
-                                actual_minutes.unwrap_or(0),
-                            );
+                            let feedback =
+                                Feedback::completed(task.id.clone(), actual_minutes.unwrap_or(0));
                             let mut lm = state.learning_manager.write().await;
                             lm.update_from_feedback(&task, &feedback);
                             drop(lm);
                             state.maybe_save_learning_model().await;
-                            debug!("Updated learning model for completed task: {}", task.short_id());
+                            debug!(
+                                "Updated learning model for completed task: {}",
+                                task.short_id()
+                            );
                             Response::task(task)
                         }
                         Err(e) => Response::error(format!("Failed to complete task: {}", e)),
@@ -236,7 +237,10 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
                         lm.update_from_feedback(&task, &feedback);
                         drop(lm);
                         state.maybe_save_learning_model().await;
-                        debug!("Updated learning model for postponed task: {}", task.short_id());
+                        debug!(
+                            "Updated learning model for postponed task: {}",
+                            task.short_id()
+                        );
                         Response::task(task)
                     }
                     Err(e) => Response::error(format!("Failed to postpone task: {}", e)),
@@ -338,7 +342,8 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
             notes,
         } => match state.storage.get_by_short_id(&task_id).await {
             Ok(Some(task)) => {
-                let mut feedback = Feedback::new(task.id.clone(), crate::models::FeedbackType::Completed);
+                let mut feedback =
+                    Feedback::new(task.id.clone(), crate::models::FeedbackType::Completed);
                 feedback.rating = rating;
                 feedback.difficulty_rating = difficulty;
                 feedback.energy_level = energy_level;
@@ -358,15 +363,16 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
         Request::GetLearningStats { task_type } => {
             let lm = state.learning_manager.read().await;
 
-            let task_type_stats: Vec<crate::protocol::TaskTypeStatsData> = if let Some(ref tt) = task_type {
-                lm.get_model(tt)
-                    .map(|m| vec![model_to_stats_data(m)])
-                    .unwrap_or_default()
-            } else {
-                lm.all_models()
-                    .map(|(_, m)| model_to_stats_data(m))
-                    .collect()
-            };
+            let task_type_stats: Vec<crate::protocol::TaskTypeStatsData> =
+                if let Some(ref tt) = task_type {
+                    lm.get_model(tt)
+                        .map(|m| vec![model_to_stats_data(m)])
+                        .unwrap_or_default()
+                } else {
+                    lm.all_models()
+                        .map(|(_, m)| model_to_stats_data(m))
+                        .collect()
+                };
 
             let global = lm.global_stats();
             let time_slot_stats = bandit_to_time_slot_stats(&global.time_slot_bandit);
@@ -401,10 +407,98 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
                 Err(e) => Response::error(format!("Database error: {}", e)),
             }
         }
+
+        Request::ResetLearningData { task_type } => {
+            let mut lm = state.learning_manager.write().await;
+            lm.reset(task_type.as_deref());
+            state.save_learning_model().await;
+            info!("Reset learning data: {:?}", task_type);
+            Response::ok()
+        }
+
+        Request::SetTimeSlotPreference {
+            task_type,
+            time_slot,
+            strength,
+        } => {
+            let arm = match time_slot.to_lowercase().as_str() {
+                "morning" => crate::learning::TimeSlotArm::Morning,
+                "afternoon" => crate::learning::TimeSlotArm::Afternoon,
+                "evening" => crate::learning::TimeSlotArm::Evening,
+                "night" => crate::learning::TimeSlotArm::Night,
+                _ => {
+                    return Response::error(format!(
+                        "Invalid time slot: {}. Use: morning/afternoon/evening/night",
+                        time_slot
+                    ));
+                }
+            };
+
+            let mut lm = state.learning_manager.write().await;
+            lm.set_time_slot_preference(&task_type, arm, strength);
+            state.save_learning_model().await;
+            info!(
+                "Set preference for {}: {} (strength: {})",
+                task_type, time_slot, strength
+            );
+            Response::ok()
+        }
+
+        Request::ExportLearningData => {
+            let lm = state.learning_manager.read().await;
+            match lm.to_json() {
+                Ok(data) => Response::LearningDataExport { data },
+                Err(e) => Response::error(format!("Failed to export: {}", e)),
+            }
+        }
+
+        Request::ImportLearningData { data, merge } => {
+            match crate::learning::LearningManager::from_json(&data) {
+                Ok(imported) => {
+                    let imported_state = imported.to_state();
+                    let mut lm = state.learning_manager.write().await;
+                    lm.import_state(imported_state, merge);
+                    drop(lm);
+                    state.save_learning_model().await;
+                    info!("Imported learning data (merge: {})", merge);
+                    Response::ok()
+                }
+                Err(e) => Response::error(format!("Failed to parse import data: {}", e)),
+            }
+        }
+
+        Request::InspectLearningModel { task_type } => {
+            let lm = state.learning_manager.read().await;
+            let global = lm.global_stats();
+
+            let global_stats = crate::protocol::GlobalModelStats {
+                total_tasks: global.total_tasks,
+                time_slots: bandit_to_time_slot_stats(&global.time_slot_bandit),
+                ftrl_weights_count: lm.get_global_ftrl_weights_count(),
+            };
+
+            let task_type_models: Vec<crate::protocol::TaskTypeModelStats> =
+                if let Some(ref tt) = task_type {
+                    lm.get_model(tt)
+                        .map(|m| vec![model_to_inspection_stats(m)])
+                        .unwrap_or_default()
+                } else {
+                    lm.all_models()
+                        .map(|(_, m)| model_to_inspection_stats(m))
+                        .collect()
+                };
+
+            Response::LearningModelInspection {
+                global_stats,
+                task_type_models,
+            }
+        }
     }
 }
 
-fn model_to_stats_data(model: &crate::learning::TaskTypeLearningModel) -> crate::protocol::TaskTypeStatsData {
+fn model_to_stats_data(
+    model: &crate::learning::TaskTypeLearningModel,
+) -> crate::protocol::TaskTypeStatsData {
     crate::protocol::TaskTypeStatsData {
         task_type: model.task_type.name.clone(),
         total_scheduled: model.total_scheduled,
@@ -416,7 +510,42 @@ fn model_to_stats_data(model: &crate::learning::TaskTypeLearningModel) -> crate:
     }
 }
 
-fn bandit_to_time_slot_stats(bandit: &crate::learning::TimeSlotBandit) -> crate::protocol::TimeSlotStatsData {
+fn model_to_inspection_stats(
+    model: &crate::learning::TaskTypeLearningModel,
+) -> crate::protocol::TaskTypeModelStats {
+    use crate::learning::TimeSlotArm;
+
+    let slot_detail = |arm: TimeSlotArm| {
+        let stats = model.time_slot_bandit.get_stats(arm);
+        crate::protocol::TimeSlotDetail {
+            successes: (stats.successes - 1.0).max(0.0) as u32,
+            failures: (stats.failures - 1.0).max(0.0) as u32,
+            success_rate: stats.success_rate(),
+        }
+    };
+
+    crate::protocol::TaskTypeModelStats {
+        task_type: model.task_type.name.clone(),
+        total_scheduled: model.total_scheduled,
+        total_completed: model.total_completed,
+        total_postponed: model.total_postponed,
+        total_skipped: model.total_skipped,
+        completion_rate: model.completion_rate(),
+        best_time_slot: format!("{:?}", model.best_time_slot()),
+        time_slots: crate::protocol::TimeSlotStatsData {
+            morning: slot_detail(TimeSlotArm::Morning),
+            afternoon: slot_detail(TimeSlotArm::Afternoon),
+            evening: slot_detail(TimeSlotArm::Evening),
+            night: slot_detail(TimeSlotArm::Night),
+        },
+        avg_duration_minutes: model.avg_duration_minutes,
+        ftrl_weights_count: model.ftrl_weights_count(),
+    }
+}
+
+fn bandit_to_time_slot_stats(
+    bandit: &crate::learning::TimeSlotBandit,
+) -> crate::protocol::TimeSlotStatsData {
     use crate::learning::TimeSlotArm;
 
     let slot_detail = |arm: TimeSlotArm| {
