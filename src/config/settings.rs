@@ -40,7 +40,7 @@ impl Default for DaemonSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationSettings {
-    #[serde(default = "default_enabled")]
+    #[serde(default = "default_disabled")]
     pub enabled: bool,
     #[serde(default = "default_sound")]
     pub sound: bool,
@@ -50,6 +50,10 @@ pub struct NotificationSettings {
 
 fn default_enabled() -> bool {
     true
+}
+
+fn default_disabled() -> bool {
+    false
 }
 
 fn default_sound() -> bool {

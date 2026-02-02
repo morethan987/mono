@@ -33,8 +33,7 @@ impl Scheduler {
     pub async fn run(&mut self) {
         let settings = self.settings_rx.borrow().clone();
         let mut current_interval_secs = settings.daemon.check_interval_secs;
-        let mut tick_interval =
-            tokio::time::interval(Duration::from_secs(current_interval_secs));
+        let mut tick_interval = tokio::time::interval(Duration::from_secs(current_interval_secs));
 
         info!("Scheduler started with {}s interval", current_interval_secs);
 
@@ -84,6 +83,24 @@ impl Scheduler {
                 return;
             }
         };
+
+        // avoid sending multiple notifications simultaneously
+        let in_progress_tasks = match self.state.storage.list_in_progress().await {
+            Ok(tasks) => tasks,
+            Err(e) => {
+                error!("Failed to list in-progress tasks: {}", e);
+                return;
+            }
+        };
+
+        if !in_progress_tasks.is_empty() {
+            debug!(
+                "Task already in progress: {} ({}), skipping notification",
+                in_progress_tasks[0].title,
+                in_progress_tasks[0].short_id()
+            );
+            return;
+        }
 
         let ready_tasks = match self.state.storage.list_ready_for_notification().await {
             Ok(tasks) => tasks,
