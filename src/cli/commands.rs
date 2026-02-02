@@ -90,7 +90,7 @@ pub struct AddArgs {
     #[arg(help = "任务标题")]
     pub title: String,
 
-    #[arg(short, long, help = "优先级 (low, medium, high, urgent)")]
+    #[arg(short, long, help = "优先级")]
     pub priority: Option<CliPriority>,
 
     #[arg(
@@ -193,7 +193,7 @@ pub struct UpdateArgs {
     #[arg(long, help = "新标题")]
     pub title: Option<String>,
 
-    #[arg(short, long, help = "优先级 (low, medium, high, urgent)")]
+    #[arg(short, long, help = "优先级")]
     pub priority: Option<CliPriority>,
 
     #[arg(
