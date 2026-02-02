@@ -81,13 +81,13 @@ pub fn run_daemon_background(paths: &MonoPaths) -> Result<()> {
 async fn run_daemon_main(paths: &MonoPaths) -> Result<()> {
     let config_watcher = Arc::new(ConfigWatcher::new(paths.config_file()).await?);
     let settings = config_watcher.current_settings();
-    let settings_rx = config_watcher.subscribe();
 
     let pool = create_pool(&paths.database).await?;
     run_migrations(&pool).await?;
 
     let storage = SqliteStorage::new(pool);
-    let mut daemon_state = DaemonState::new(storage, paths.clone(), settings, settings_rx).await;
+    let scheduler_settings_rx = config_watcher.subscribe();
+    let daemon_state = DaemonState::new(storage, paths.clone(), settings).await;
 
     daemon_state.init_notification_backend().await;
 
@@ -96,7 +96,11 @@ async fn run_daemon_main(paths: &MonoPaths) -> Result<()> {
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
     let server = Arc::new(DaemonServer::new(Arc::clone(&state)));
-    let mut scheduler = Scheduler::new(Arc::clone(&state), shutdown_tx.subscribe());
+    let mut scheduler = Scheduler::new(
+        Arc::clone(&state),
+        shutdown_tx.subscribe(),
+        scheduler_settings_rx,
+    );
 
     let server_clone = Arc::clone(&server);
     let server_handle = tokio::spawn(async move {
@@ -110,24 +114,8 @@ async fn run_daemon_main(paths: &MonoPaths) -> Result<()> {
     });
 
     let config_watcher_clone = Arc::clone(&config_watcher);
-    let state_clone = Arc::clone(&state);
     let config_watcher_handle = tokio::spawn(async move {
-        let mut settings_rx = state_clone.settings_receiver();
-        loop {
-            tokio::select! {
-                result = settings_rx.changed() => {
-                    if result.is_ok() {
-                        let new_settings = settings_rx.borrow_and_update().clone();
-                        state_clone.update_settings(new_settings).await;
-                    } else {
-                        break;
-                    }
-                }
-                _ = config_watcher_clone.run() => {
-                    break;
-                }
-            }
-        }
+        config_watcher_clone.run().await;
     });
 
     let state_clone = Arc::clone(&state);

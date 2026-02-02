@@ -1,36 +1,61 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
+use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
+use crate::config::Settings;
 use crate::daemon::DaemonState;
 use crate::notification::{
-    ActionHandler, LinuxNotificationBackend, NotificationAction, NotificationBackend,
-    NotificationResponse,
+    ActionHandler, NotificationAction, NotificationBackend, NotificationResponse,
 };
 use crate::storage::TaskRepository;
 
 pub struct Scheduler {
     state: Arc<DaemonState>,
     shutdown_rx: broadcast::Receiver<()>,
+    settings_rx: watch::Receiver<Settings>,
 }
 
 impl Scheduler {
-    pub fn new(state: Arc<DaemonState>, shutdown_rx: broadcast::Receiver<()>) -> Self {
-        Self { state, shutdown_rx }
+    pub fn new(
+        state: Arc<DaemonState>,
+        shutdown_rx: broadcast::Receiver<()>,
+        settings_rx: watch::Receiver<Settings>,
+    ) -> Self {
+        Self {
+            state,
+            shutdown_rx,
+            settings_rx,
+        }
     }
 
     pub async fn run(&mut self) {
-        let settings = self.state.settings().await;
-        let interval = Duration::from_secs(settings.daemon.check_interval_secs);
-        let mut tick_interval = tokio::time::interval(interval);
+        let settings = self.settings_rx.borrow().clone();
+        let mut current_interval_secs = settings.daemon.check_interval_secs;
+        let mut tick_interval =
+            tokio::time::interval(Duration::from_secs(current_interval_secs));
 
-        info!("Scheduler started with {}s interval", interval.as_secs());
+        info!("Scheduler started with {}s interval", current_interval_secs);
 
         loop {
             tokio::select! {
                 _ = tick_interval.tick() => {
                     self.tick().await;
+                }
+                result = self.settings_rx.changed() => {
+                    if result.is_ok() {
+                        let new_settings = self.settings_rx.borrow_and_update().clone();
+                        let new_interval = new_settings.daemon.check_interval_secs;
+                        if new_interval != current_interval_secs {
+                            info!(
+                                "Check interval changed: {}s -> {}s",
+                                current_interval_secs, new_interval
+                            );
+                            current_interval_secs = new_interval;
+                            tick_interval = tokio::time::interval(Duration::from_secs(new_interval));
+                        }
+                    }
                 }
                 _ = self.shutdown_rx.recv() => {
                     info!("Scheduler shutting down");
@@ -43,13 +68,16 @@ impl Scheduler {
     async fn tick(&self) {
         debug!("Scheduler tick at {}", chrono::Utc::now());
 
-        let settings = self.state.settings().await;
+        let settings = self.settings_rx.borrow().clone();
         if !settings.notification.enabled {
+            debug!("Notifications disabled");
             return;
         }
 
-        let notification_backend: &LinuxNotificationBackend = match &self.state.notification_backend
-        {
+        self.state.ensure_notification_backend().await;
+
+        let backend_guard = self.state.notification_backend.read().await;
+        let notification_backend = match backend_guard.as_ref() {
             Some(backend) => backend,
             None => {
                 debug!("Notification backend not available");

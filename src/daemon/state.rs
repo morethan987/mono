@@ -2,7 +2,6 @@ use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::RwLock;
-use tokio::sync::watch;
 
 use crate::config::{MonoPaths, Settings};
 use crate::learning::LearningManager;
@@ -16,23 +15,17 @@ const SAVE_AFTER_N_UPDATES: u32 = 10;
 pub struct DaemonState {
     pub storage: SqliteStorage,
     pub paths: MonoPaths,
-    settings: RwLock<Settings>,
-    settings_rx: watch::Receiver<Settings>,
     pub started_at: DateTime<Utc>,
     pub scheduler: SchedulingEngine,
-    pub notification_backend: Option<LinuxNotificationBackend>,
+    pub notification_backend: RwLock<Option<LinuxNotificationBackend>>,
     pub learning_manager: Arc<RwLock<LearningManager>>,
     shutdown_requested: Arc<RwLock<bool>>,
     learning_updates_since_save: AtomicU32,
+    initial_notification_enabled: bool,
 }
 
 impl DaemonState {
-    pub async fn new(
-        storage: SqliteStorage,
-        paths: MonoPaths,
-        settings: Settings,
-        settings_rx: watch::Receiver<Settings>,
-    ) -> Self {
+    pub async fn new(storage: SqliteStorage, paths: MonoPaths, settings: Settings) -> Self {
         let learning_manager = match storage.load_learning_manager().await {
             Ok(Some(manager)) => {
                 tracing::info!("Loaded learning model from database");
@@ -56,38 +49,37 @@ impl DaemonState {
         Self {
             storage,
             paths,
-            settings: RwLock::new(settings),
-            settings_rx,
             started_at: Utc::now(),
             scheduler,
-            notification_backend: None,
+            notification_backend: RwLock::new(None),
             learning_manager,
             shutdown_requested: Arc::new(RwLock::new(false)),
             learning_updates_since_save: AtomicU32::new(0),
+            initial_notification_enabled: settings.notification.enabled,
         }
     }
 
-    pub async fn settings(&self) -> Settings {
-        self.settings.read().await.clone()
-    }
-
-    pub async fn update_settings(&self, new_settings: Settings) {
-        let mut settings = self.settings.write().await;
-        *settings = new_settings;
-        tracing::info!("Settings updated via hot reload");
-    }
-
-    pub fn settings_receiver(&self) -> watch::Receiver<Settings> {
-        self.settings_rx.clone()
-    }
-
-    pub async fn init_notification_backend(&mut self) {
-        let settings = self.settings.read().await;
-        if settings.notification.enabled {
+    pub async fn init_notification_backend(&self) {
+        if self.initial_notification_enabled {
             match LinuxNotificationBackend::new().await {
                 Ok(backend) => {
                     tracing::info!("Notification backend initialized");
-                    self.notification_backend = Some(backend);
+                    *self.notification_backend.write().await = Some(backend);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to initialize notification backend: {}", e);
+                }
+            }
+        }
+    }
+
+    pub async fn ensure_notification_backend(&self) {
+        let mut backend = self.notification_backend.write().await;
+        if backend.is_none() {
+            match LinuxNotificationBackend::new().await {
+                Ok(new_backend) => {
+                    tracing::info!("Notification backend initialized on demand");
+                    *backend = Some(new_backend);
                 }
                 Err(e) => {
                     tracing::warn!("Failed to initialize notification backend: {}", e);

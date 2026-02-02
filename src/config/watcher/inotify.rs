@@ -20,8 +20,15 @@ const IN_DELETE: u32 = 0x0000_0200;
 const IN_DELETE_SELF: u32 = 0x0000_0400;
 const IN_MOVE_SELF: u32 = 0x0000_0800;
 
-const WATCH_MASK: u32 =
-    IN_MODIFY | IN_ATTRIB | IN_CLOSE_WRITE | IN_CREATE | IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF;
+const WATCH_MASK: u32 = IN_MODIFY
+    | IN_ATTRIB
+    | IN_CLOSE_WRITE
+    | IN_MOVED_FROM
+    | IN_MOVED_TO
+    | IN_CREATE
+    | IN_DELETE
+    | IN_DELETE_SELF
+    | IN_MOVE_SELF;
 
 const INOTIFY_EVENT_SIZE: usize = std::mem::size_of::<InotifyEventRaw>();
 

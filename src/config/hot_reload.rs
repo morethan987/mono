@@ -4,7 +4,7 @@ use crate::error::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::watch;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 pub struct ConfigWatcher {
     config_path: PathBuf,
@@ -20,11 +20,13 @@ impl ConfigWatcher {
 
         let watcher = Arc::new(InotifyWatcher::new()?);
 
-        if config_path.exists() {
-            watcher.watch(&config_path).await?;
-        } else if let Some(parent) = config_path.parent() {
+        if let Some(parent) = config_path.parent() {
             if parent.exists() {
                 watcher.watch(parent).await?;
+                info!(
+                    "Watching directory for config changes: {}",
+                    parent.display()
+                );
             }
         }
 
@@ -50,6 +52,7 @@ impl ConfigWatcher {
         while self.watcher.is_active() {
             match self.watcher.next_event().await {
                 Ok(Some(event)) => {
+                    debug!("File event in config directory: {:?}", event);
                     if self.should_reload(&event) {
                         self.reload_config().await;
                     }
@@ -69,12 +72,20 @@ impl ConfigWatcher {
     fn should_reload(&self, event: &FileEvent) -> bool {
         matches!(
             event,
-            FileEvent::Modified | FileEvent::ClosedWrite | FileEvent::Created
+            FileEvent::Modified
+                | FileEvent::ClosedWrite
+                | FileEvent::Created
+                | FileEvent::Renamed
         )
     }
 
     async fn reload_config(&self) {
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        if !self.config_path.exists() {
+            debug!("Config file does not exist yet, skipping reload");
+            return;
+        }
 
         match Settings::load(&self.config_path) {
             Ok(new_settings) => {
@@ -137,5 +148,68 @@ mod tests {
 
         let settings = rx.borrow_and_update().clone();
         assert_eq!(settings.daemon.check_interval_secs, 60);
+    }
+
+    #[tokio::test]
+    async fn test_hot_reload_on_direct_write() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        fs::write(&config_path, "[daemon]\ncheck_interval_secs = 60").unwrap();
+
+        let watcher = Arc::new(ConfigWatcher::new(config_path.clone()).await.unwrap());
+        let mut rx = watcher.subscribe();
+
+        assert_eq!(rx.borrow().daemon.check_interval_secs, 60);
+
+        let watcher_clone = Arc::clone(&watcher);
+        let watcher_handle = tokio::spawn(async move {
+            watcher_clone.run().await;
+        });
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        fs::write(&config_path, "[daemon]\ncheck_interval_secs = 10").unwrap();
+
+        let changed = tokio::time::timeout(tokio::time::Duration::from_secs(2), rx.changed()).await;
+
+        assert!(changed.is_ok(), "Should receive config change notification");
+        assert_eq!(rx.borrow().daemon.check_interval_secs, 10);
+
+        watcher.stop().await.unwrap();
+        watcher_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_hot_reload_on_atomic_write() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        fs::write(&config_path, "[daemon]\ncheck_interval_secs = 60").unwrap();
+
+        let watcher = Arc::new(ConfigWatcher::new(config_path.clone()).await.unwrap());
+        let mut rx = watcher.subscribe();
+
+        assert_eq!(rx.borrow().daemon.check_interval_secs, 60);
+
+        let watcher_clone = Arc::clone(&watcher);
+        let watcher_handle = tokio::spawn(async move {
+            watcher_clone.run().await;
+        });
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let tmp_path = dir.path().join("config.toml.tmp");
+        fs::write(&tmp_path, "[daemon]\ncheck_interval_secs = 20").unwrap();
+        fs::rename(&tmp_path, &config_path).unwrap();
+
+        let changed = tokio::time::timeout(tokio::time::Duration::from_secs(2), rx.changed()).await;
+
+        assert!(
+            changed.is_ok(),
+            "Should receive config change notification on atomic write"
+        );
+        assert_eq!(rx.borrow().daemon.check_interval_secs, 20);
+
+        watcher.stop().await.unwrap();
+        watcher_handle.abort();
     }
 }
