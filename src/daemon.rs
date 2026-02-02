@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{error, info};
 
-use crate::config::{MonoPaths, Settings};
+use crate::config::{ConfigWatcher, MonoPaths};
 use crate::error::{MonoError, Result};
 use crate::platform::{Platform, UnixPlatform};
 use crate::storage::{SqliteStorage, create_pool, run_migrations};
@@ -79,13 +79,15 @@ pub fn run_daemon_background(paths: &MonoPaths) -> Result<()> {
 }
 
 async fn run_daemon_main(paths: &MonoPaths) -> Result<()> {
-    let settings = Settings::load(&paths.config_file())?;
+    let config_watcher = Arc::new(ConfigWatcher::new(paths.config_file()).await?);
+    let settings = config_watcher.current_settings();
+    let settings_rx = config_watcher.subscribe();
 
     let pool = create_pool(&paths.database).await?;
     run_migrations(&pool).await?;
 
     let storage = SqliteStorage::new(pool);
-    let mut daemon_state = DaemonState::new(storage, paths.clone(), settings).await;
+    let mut daemon_state = DaemonState::new(storage, paths.clone(), settings, settings_rx).await;
 
     daemon_state.init_notification_backend().await;
 
@@ -107,6 +109,27 @@ async fn run_daemon_main(paths: &MonoPaths) -> Result<()> {
         scheduler.run().await;
     });
 
+    let config_watcher_clone = Arc::clone(&config_watcher);
+    let state_clone = Arc::clone(&state);
+    let config_watcher_handle = tokio::spawn(async move {
+        let mut settings_rx = state_clone.settings_receiver();
+        loop {
+            tokio::select! {
+                result = settings_rx.changed() => {
+                    if result.is_ok() {
+                        let new_settings = settings_rx.borrow_and_update().clone();
+                        state_clone.update_settings(new_settings).await;
+                    } else {
+                        break;
+                    }
+                }
+                _ = config_watcher_clone.run() => {
+                    break;
+                }
+            }
+        }
+    });
+
     let state_clone = Arc::clone(&state);
     let shutdown_tx_clone = shutdown_tx.clone();
     tokio::spawn(async move {
@@ -120,6 +143,7 @@ async fn run_daemon_main(paths: &MonoPaths) -> Result<()> {
             info!("Shutdown requested, stopping daemon...");
             server.trigger_shutdown();
             let _ = shutdown_tx.send(());
+            let _ = config_watcher.stop().await;
             break;
         }
     }
@@ -127,6 +151,7 @@ async fn run_daemon_main(paths: &MonoPaths) -> Result<()> {
     let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), async {
         let _ = server_handle.await;
         let _ = scheduler_handle.await;
+        config_watcher_handle.abort();
     })
     .await;
 

@@ -84,6 +84,10 @@ pub enum MonoError {
     #[error("JSON serialization error: {0}")]
     JsonSerialization(#[from] serde_json::Error),
 
+    // ========== File Watch Errors ==========
+    #[error("File watch error: {0}")]
+    FileWatch(String),
+
     // ========== Platform Errors ==========
     #[error("Platform error: {0}")]
     Platform(String),

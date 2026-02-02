@@ -21,7 +21,8 @@ impl Scheduler {
     }
 
     pub async fn run(&mut self) {
-        let interval = Duration::from_secs(self.state.settings.daemon.check_interval_secs);
+        let settings = self.state.settings().await;
+        let interval = Duration::from_secs(settings.daemon.check_interval_secs);
         let mut tick_interval = tokio::time::interval(interval);
 
         info!("Scheduler started with {}s interval", interval.as_secs());
@@ -42,7 +43,8 @@ impl Scheduler {
     async fn tick(&self) {
         debug!("Scheduler tick at {}", chrono::Utc::now());
 
-        if !self.state.settings.notification.enabled {
+        let settings = self.state.settings().await;
+        if !settings.notification.enabled {
             return;
         }
 

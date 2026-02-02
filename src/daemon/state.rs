@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::RwLock;
+use tokio::sync::watch;
 
 use crate::config::{MonoPaths, Settings};
 use crate::learning::LearningManager;
@@ -15,7 +16,8 @@ const SAVE_AFTER_N_UPDATES: u32 = 10;
 pub struct DaemonState {
     pub storage: SqliteStorage,
     pub paths: MonoPaths,
-    pub settings: Settings,
+    settings: RwLock<Settings>,
+    settings_rx: watch::Receiver<Settings>,
     pub started_at: DateTime<Utc>,
     pub scheduler: SchedulingEngine,
     pub notification_backend: Option<LinuxNotificationBackend>,
@@ -25,7 +27,12 @@ pub struct DaemonState {
 }
 
 impl DaemonState {
-    pub async fn new(storage: SqliteStorage, paths: MonoPaths, settings: Settings) -> Self {
+    pub async fn new(
+        storage: SqliteStorage,
+        paths: MonoPaths,
+        settings: Settings,
+        settings_rx: watch::Receiver<Settings>,
+    ) -> Self {
         let learning_manager = match storage.load_learning_manager().await {
             Ok(Some(manager)) => {
                 tracing::info!("Loaded learning model from database");
@@ -49,7 +56,8 @@ impl DaemonState {
         Self {
             storage,
             paths,
-            settings,
+            settings: RwLock::new(settings),
+            settings_rx,
             started_at: Utc::now(),
             scheduler,
             notification_backend: None,
@@ -59,8 +67,23 @@ impl DaemonState {
         }
     }
 
+    pub async fn settings(&self) -> Settings {
+        self.settings.read().await.clone()
+    }
+
+    pub async fn update_settings(&self, new_settings: Settings) {
+        let mut settings = self.settings.write().await;
+        *settings = new_settings;
+        tracing::info!("Settings updated via hot reload");
+    }
+
+    pub fn settings_receiver(&self) -> watch::Receiver<Settings> {
+        self.settings_rx.clone()
+    }
+
     pub async fn init_notification_backend(&mut self) {
-        if self.settings.notification.enabled {
+        let settings = self.settings.read().await;
+        if settings.notification.enabled {
             match LinuxNotificationBackend::new().await {
                 Ok(backend) => {
                     tracing::info!("Notification backend initialized");
