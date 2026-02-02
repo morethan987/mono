@@ -17,9 +17,9 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::{
-    Cli, Commands, ConfigAction, DaemonAction, DaemonClient, StatsAction, format_ranked_task_list,
-    format_task_detail, format_task_list, parse_deadline, print_error, print_info, print_success,
-    print_warning, InterruptArgs, StartArgs,
+    Cli, Commands, ConfigAction, DaemonAction, DaemonClient, InterruptArgs, StartArgs, StatsAction,
+    format_ranked_task_list, format_task_detail, format_task_list, parse_deadline_with_work_end,
+    print_error, print_info, print_success, print_warning,
 };
 use crate::config::{MonoPaths, Settings};
 use crate::daemon::{daemon_status, run_daemon_background, run_daemon_foreground, stop_daemon};
@@ -144,7 +144,10 @@ async fn handle_add(args: cli::AddArgs, paths: &MonoPaths) -> error::Result<()> 
     let settings = Settings::load(&paths.config_file()).unwrap_or_default();
     let mut client = DaemonClient::connect(&paths.socket, settings.daemon.ipc_timeout_secs).await?;
 
-    let deadline = args.deadline.as_ref().and_then(|d| parse_deadline(d));
+    let deadline = args
+        .deadline
+        .as_ref()
+        .and_then(|d| parse_deadline_with_work_end(d, settings.scheduling.work_end_hour));
 
     let response = client
         .request(Request::AddTask {
@@ -310,7 +313,9 @@ async fn handle_start(args: StartArgs, paths: &MonoPaths) -> error::Result<()> {
     let mut client = DaemonClient::connect(&paths.socket, settings.daemon.ipc_timeout_secs).await?;
 
     let response = client
-        .request(Request::StartTask { id: args.id.clone() })
+        .request(Request::StartTask {
+            id: args.id.clone(),
+        })
         .await?;
 
     match response {
@@ -495,55 +500,101 @@ async fn handle_delete(args: cli::DeleteArgs, paths: &MonoPaths) -> error::Resul
     let settings = Settings::load(&paths.config_file()).unwrap_or_default();
     let mut client = DaemonClient::connect(&paths.socket, settings.daemon.ipc_timeout_secs).await?;
 
-    if !args.force {
-        let get_response = client
-            .request(Request::GetTask {
-                id: args.id.clone(),
+    if args.ids.is_empty() {
+        print_error("请提供至少一个任务 ID");
+        return Ok(());
+    }
+
+    if args.ids.len() == 1 {
+        let id = &args.ids[0];
+        if !args.force {
+            let get_response = client.request(Request::GetTask { id: id.clone() }).await?;
+
+            match get_response {
+                Response::Task { task } => {
+                    println!("即将删除任务:");
+                    println!("{}", format_task_detail(&task));
+                    print!("确认删除? [y/N] ");
+                    use std::io::Write;
+                    std::io::stdout().flush().ok();
+
+                    let mut input = String::new();
+                    std::io::stdin().read_line(&mut input).ok();
+
+                    if !input.trim().eq_ignore_ascii_case("y") {
+                        print_info("已取消删除");
+                        return Ok(());
+                    }
+                }
+                Response::Error { message } => {
+                    print_error(&message);
+                    return Ok(());
+                }
+                _ => {
+                    print_error("意外的响应");
+                    return Ok(());
+                }
+            }
+        }
+
+        let response = client
+            .request(Request::DeleteTask { id: id.clone() })
+            .await?;
+
+        match response {
+            Response::Ok => {
+                print_success("任务已删除");
+            }
+            Response::Error { message } => {
+                print_error(&message);
+            }
+            _ => {
+                print_error("意外的响应");
+            }
+        }
+    } else {
+        if !args.force {
+            println!("即将删除 {} 个任务:", args.ids.len());
+            for id in &args.ids {
+                println!("  - {}", id);
+            }
+            print!("确认删除? [y/N] ");
+            use std::io::Write;
+            std::io::stdout().flush().ok();
+
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input).ok();
+
+            if !input.trim().eq_ignore_ascii_case("y") {
+                print_info("已取消删除");
+                return Ok(());
+            }
+        }
+
+        let response = client
+            .request(Request::DeleteTasks {
+                ids: args.ids.clone(),
             })
             .await?;
 
-        match get_response {
-            Response::Task { task } => {
-                println!("即将删除任务:");
-                println!("{}", format_task_detail(&task));
-                print!("确认删除? [y/N] ");
-                use std::io::Write;
-                std::io::stdout().flush().ok();
-
-                let mut input = String::new();
-                std::io::stdin().read_line(&mut input).ok();
-
-                if !input.trim().eq_ignore_ascii_case("y") {
-                    print_info("已取消删除");
-                    return Ok(());
+        match response {
+            Response::DeleteTasksResult { deleted, failed } => {
+                if !deleted.is_empty() {
+                    print_success(&format!("成功删除 {} 个任务", deleted.len()));
+                }
+                if !failed.is_empty() {
+                    print_warning(&format!("删除失败 {} 个任务:", failed.len()));
+                    for err in &failed {
+                        println!("  - {}: {}", err.id, err.reason);
+                    }
                 }
             }
             Response::Error { message } => {
                 print_error(&message);
-                return Ok(());
             }
             _ => {
                 print_error("意外的响应");
-                return Ok(());
             }
-        }
-    }
-
-    let response = client
-        .request(Request::DeleteTask {
-            id: args.id.clone(),
-        })
-        .await?;
-
-    match response {
-        Response::Ok => {
-            print_success("任务已删除");
-        }
-        Response::Error { message } => {
-            print_error(&message);
-        }
-        _ => {
-            print_error("意外的响应");
         }
     }
 
@@ -554,7 +605,10 @@ async fn handle_update(args: cli::UpdateArgs, paths: &MonoPaths) -> error::Resul
     let settings = Settings::load(&paths.config_file()).unwrap_or_default();
     let mut client = DaemonClient::connect(&paths.socket, settings.daemon.ipc_timeout_secs).await?;
 
-    let deadline = args.deadline.as_ref().and_then(|d| parse_deadline(d));
+    let deadline = args
+        .deadline
+        .as_ref()
+        .and_then(|d| parse_deadline_with_work_end(d, settings.scheduling.work_end_hour));
     let tags = if args.tag.is_empty() {
         None
     } else {
@@ -838,7 +892,7 @@ async fn handle_stats_show(
             if stats.task_type_stats.is_empty() {
                 print_info("暂无任务类型统计数据，完成更多任务后将显示学习成果");
                 println!();
-                println!("{}", "💡 提示: 使用 'mono stats manage set-preference' 可以手动设置时段偏好来减少冷启动时间".dimmed());
+                println!("{}", "💡 提示: 使用 'mono stats set-preference' 可以手动设置时段偏好来减少冷启动时间".dimmed());
             } else {
                 println!("{}\n", "📌 任务类型统计".bold());
 

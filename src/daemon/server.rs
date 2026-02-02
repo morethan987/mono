@@ -8,7 +8,7 @@ use tracing::{debug, error, info, warn};
 use crate::daemon::DaemonState;
 use crate::error::{MonoError, Result};
 use crate::models::{Feedback, Priority, Task, TaskStatus};
-use crate::protocol::{Request, Response, decode_request, encode_response};
+use crate::protocol::{DeleteTaskError, Request, Response, decode_request, encode_response};
 use crate::storage::TaskRepository;
 
 pub struct DaemonServer {
@@ -259,6 +259,33 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
             Err(e) => Response::error(format!("Database error: {}", e)),
         },
 
+        Request::DeleteTasks { ids } => {
+            let mut deleted = Vec::new();
+            let mut failed = Vec::new();
+
+            for id in ids {
+                match state.storage.get_by_short_id(&id).await {
+                    Ok(Some(task)) => match state.storage.delete(&task.id).await {
+                        Ok(()) => deleted.push(id),
+                        Err(e) => failed.push(DeleteTaskError {
+                            id,
+                            reason: format!("删除失败: {}", e),
+                        }),
+                    },
+                    Ok(None) => failed.push(DeleteTaskError {
+                        id,
+                        reason: "任务不存在".to_string(),
+                    }),
+                    Err(e) => failed.push(DeleteTaskError {
+                        id,
+                        reason: format!("数据库错误: {}", e),
+                    }),
+                }
+            }
+
+            Response::DeleteTasksResult { deleted, failed }
+        },
+
         Request::UpdateTask {
             id,
             title,
@@ -411,6 +438,7 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
         Request::ResetLearningData { task_type } => {
             let mut lm = state.learning_manager.write().await;
             lm.reset(task_type.as_deref());
+            drop(lm);
             state.save_learning_model().await;
             info!("Reset learning data: {:?}", task_type);
             Response::ok()
@@ -436,6 +464,7 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
 
             let mut lm = state.learning_manager.write().await;
             lm.set_time_slot_preference(&task_type, arm, strength);
+            drop(lm);
             state.save_learning_model().await;
             info!(
                 "Set preference for {}: {} (strength: {})",

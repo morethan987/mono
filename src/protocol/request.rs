@@ -50,6 +50,10 @@ pub enum Request {
         id: String,
     },
 
+    DeleteTasks {
+        ids: Vec<String>,
+    },
+
     UpdateTask {
         id: String,
         title: Option<String>,
@@ -125,6 +129,7 @@ impl Request {
             Request::CompleteTask { .. } => "complete_task",
             Request::PostponeTask { .. } => "postpone_task",
             Request::DeleteTask { .. } => "delete_task",
+            Request::DeleteTasks { .. } => "delete_tasks",
             Request::UpdateTask { .. } => "update_task",
             Request::SubmitFeedback { .. } => "submit_feedback",
             Request::GetLearningStats { .. } => "get_learning_stats",

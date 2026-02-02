@@ -1,4 +1,4 @@
-use chrono::{DateTime, NaiveDate, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Local, NaiveDate, NaiveTime, TimeZone, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::models::Priority;
@@ -93,7 +93,11 @@ pub struct AddArgs {
     #[arg(short, long, help = "优先级 (low, medium, high, urgent)")]
     pub priority: Option<CliPriority>,
 
-    #[arg(short, long, help = "截止日期 (YYYY-MM-DD 或 today/tomorrow)")]
+    #[arg(
+        short,
+        long,
+        help = "截止日期 (YYYY-MM-DD [HH:MM] 或 today/tomorrow [HH:MM])"
+    )]
     pub deadline: Option<String>,
 
     #[arg(short = 't', long, help = "标签（可多次使用）")]
@@ -174,8 +178,8 @@ pub struct FeedbackArgs {
 
 #[derive(Args)]
 pub struct DeleteArgs {
-    #[arg(help = "任务 ID（可使用短 ID）")]
-    pub id: String,
+    #[arg(help = "任务 ID（可使用短 ID，支持多个）", required = true)]
+    pub ids: Vec<String>,
 
     #[arg(short, long, help = "跳过确认")]
     pub force: bool,
@@ -192,7 +196,11 @@ pub struct UpdateArgs {
     #[arg(short, long, help = "优先级 (low, medium, high, urgent)")]
     pub priority: Option<CliPriority>,
 
-    #[arg(short, long, help = "截止日期 (YYYY-MM-DD 或 today/tomorrow)")]
+    #[arg(
+        short,
+        long,
+        help = "截止日期 (YYYY-MM-DD [HH:MM] 或 today/tomorrow [HH:MM])"
+    )]
     pub deadline: Option<String>,
 
     #[arg(short = 't', long, help = "标签（覆盖现有标签）")]
@@ -290,26 +298,65 @@ impl From<CliPriority> for Priority {
     }
 }
 
+/// 解析截止日期字符串，默认使用工作时间结束时刻作为截止时间
 pub fn parse_deadline(s: &str) -> Option<DateTime<Utc>> {
-    let today = Utc::now().date_naive();
+    parse_deadline_with_work_end(s, 18)
+}
 
-    match s.to_lowercase().as_str() {
-        "today" => {
-            let dt = today.and_time(NaiveTime::from_hms_opt(23, 59, 59)?);
-            Some(Utc.from_utc_datetime(&dt))
-        }
-        "tomorrow" => {
-            let tomorrow = today.succ_opt()?;
-            let dt = tomorrow.and_time(NaiveTime::from_hms_opt(23, 59, 59)?);
-            Some(Utc.from_utc_datetime(&dt))
-        }
-        _ => {
-            if let Ok(date) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-                let dt = date.and_time(NaiveTime::from_hms_opt(23, 59, 59)?);
-                Some(Utc.from_utc_datetime(&dt))
-            } else {
-                None
+/// 解析截止日期字符串，使用指定的工作结束时间（小时）
+///
+/// 支持的格式：
+/// - "today" / "tomorrow" - 当天/次日的工作结束时间
+/// - "today HH:MM" / "tomorrow HH:MM" - 当天/次日的指定时间
+/// - "YYYY-MM-DD" - 指定日期的工作结束时间
+/// - "YYYY-MM-DD HH:MM" - 指定日期和时间
+pub fn parse_deadline_with_work_end(s: &str, work_end_hour: u8) -> Option<DateTime<Utc>> {
+    let today = Local::now().date_naive();
+    let default_end_time = NaiveTime::from_hms_opt(work_end_hour as u32, 0, 0)?;
+
+    let s_lower = s.to_lowercase();
+    let s_trimmed = s_lower.trim();
+
+    if s_trimmed.starts_with("today") {
+        let remainder = s_trimmed.strip_prefix("today").unwrap().trim();
+        let time = if remainder.is_empty() {
+            default_end_time
+        } else {
+            parse_time_hhmm(remainder)?
+        };
+        let dt = today.and_time(time);
+        return Some(Local.from_local_datetime(&dt).single()?.to_utc());
+    }
+
+    if s_trimmed.starts_with("tomorrow") {
+        let remainder = s_trimmed.strip_prefix("tomorrow").unwrap().trim();
+        let tomorrow = today.succ_opt()?;
+        let time = if remainder.is_empty() {
+            default_end_time
+        } else {
+            parse_time_hhmm(remainder)?
+        };
+        let dt = tomorrow.and_time(time);
+        return Some(Local.from_local_datetime(&dt).single()?.to_utc());
+    }
+
+    if let Some((date_part, time_part)) = s.split_once(' ') {
+        if let Ok(date) = NaiveDate::parse_from_str(date_part.trim(), "%Y-%m-%d") {
+            if let Some(time) = parse_time_hhmm(time_part.trim()) {
+                let dt = date.and_time(time);
+                return Some(Local.from_local_datetime(&dt).single()?.to_utc());
             }
         }
     }
+
+    if let Ok(date) = NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d") {
+        let dt = date.and_time(default_end_time);
+        return Some(Local.from_local_datetime(&dt).single()?.to_utc());
+    }
+
+    None
+}
+
+fn parse_time_hhmm(s: &str) -> Option<NaiveTime> {
+    NaiveTime::parse_from_str(s, "%H:%M").ok()
 }

@@ -72,6 +72,17 @@ pub enum Response {
     InProgressTask {
         task: Option<Task>,
     },
+
+    DeleteTasksResult {
+        deleted: Vec<String>,
+        failed: Vec<DeleteTaskError>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteTaskError {
+    pub id: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
