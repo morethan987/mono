@@ -1,5 +1,5 @@
-use crate::config::watcher::{FileEvent, FileWatcher, InotifyWatcher};
 use crate::config::Settings;
+use crate::config::watcher::{FileEvent, FileWatcher, InotifyWatcher};
 use crate::error::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -72,10 +72,7 @@ impl ConfigWatcher {
     fn should_reload(&self, event: &FileEvent) -> bool {
         matches!(
             event,
-            FileEvent::Modified
-                | FileEvent::ClosedWrite
-                | FileEvent::Created
-                | FileEvent::Renamed
+            FileEvent::Modified | FileEvent::ClosedWrite | FileEvent::Created | FileEvent::Renamed
         )
     }
 

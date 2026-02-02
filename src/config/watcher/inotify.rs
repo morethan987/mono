@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::unix::AsyncFd;
 use tokio::sync::Mutex;
 
@@ -55,9 +55,8 @@ impl InotifyFd {
     }
 
     fn add_watch(&self, path: &Path) -> Result<i32> {
-        let c_path = CString::new(path.as_os_str().as_bytes()).map_err(|_| {
-            MonoError::FileWatch(format!("invalid path: {}", path.display()))
-        })?;
+        let c_path = CString::new(path.as_os_str().as_bytes())
+            .map_err(|_| MonoError::FileWatch(format!("invalid path: {}", path.display())))?;
 
         let wd = unsafe { libc::inotify_add_watch(self.0, c_path.as_ptr(), WATCH_MASK) };
         if wd < 0 {
@@ -188,9 +187,7 @@ impl FileWatcher for InotifyWatcher {
 
             let result = guard.try_io(|inner| {
                 let fd = inner.get_ref().as_raw_fd();
-                let n = unsafe {
-                    libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
-                };
+                let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
                 if n < 0 {
                     Err(std::io::Error::last_os_error())
                 } else {

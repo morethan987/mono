@@ -284,7 +284,7 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
             }
 
             Response::DeleteTasksResult { deleted, failed }
-        },
+        }
 
         Request::UpdateTask {
             id,
@@ -578,9 +578,16 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
             }
         }
 
-        Request::InterruptTask { id, remaining_minutes } => {
+        Request::InterruptTask {
+            id,
+            remaining_minutes,
+        } => {
             let task_result = if id.is_empty() {
-                state.storage.list_in_progress().await.map(|tasks| tasks.into_iter().next())
+                state
+                    .storage
+                    .list_in_progress()
+                    .await
+                    .map(|tasks| tasks.into_iter().next())
             } else {
                 state.storage.get_by_short_id(&id).await
             };
@@ -618,7 +625,11 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
                             lm.update_from_feedback(&task, &feedback);
                             drop(lm);
                             state.maybe_save_learning_model().await;
-                            debug!("Task interrupted: {}, remaining: {} min", task.short_id(), remaining);
+                            debug!(
+                                "Task interrupted: {}, remaining: {} min",
+                                task.short_id(),
+                                remaining
+                            );
                             Response::InterruptTaskResult {
                                 task,
                                 remaining_minutes: remaining,
