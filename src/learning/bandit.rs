@@ -143,6 +143,15 @@ impl TimeSlotBandit {
         self.total_selections += 1;
     }
 
+    /// Apply time-based decay to bandit stats
+    pub fn apply_decay(&mut self, factor: f64) {
+        for arm in &mut self.arms {
+            // Keep at least 1.0 to avoid Beta distribution issues
+            arm.successes = (arm.successes * factor).max(1.0);
+            arm.failures = (arm.failures * factor).max(1.0);
+        }
+    }
+
     pub fn get_stats(&self, arm: TimeSlotArm) -> &ArmStats {
         &self.arms[arm.as_index()]
     }

@@ -9,12 +9,16 @@ use crate::daemon::DaemonState;
 use crate::notification::{
     ActionHandler, NotificationAction, NotificationBackend, NotificationResponse,
 };
+use crate::platform::niri::NiriClient;
+use crate::scheduling::AppClassifier;
 use crate::storage::TaskRepository;
 
 pub struct Scheduler {
     state: Arc<DaemonState>,
     shutdown_rx: broadcast::Receiver<()>,
     settings_rx: watch::Receiver<Settings>,
+    app_classifier: AppClassifier,
+    mismatch_counter: std::sync::atomic::AtomicU32,
 }
 
 impl Scheduler {
@@ -27,6 +31,8 @@ impl Scheduler {
             state,
             shutdown_rx,
             settings_rx,
+            app_classifier: AppClassifier::new(),
+            mismatch_counter: std::sync::atomic::AtomicU32::new(0),
         }
     }
 
@@ -34,6 +40,7 @@ impl Scheduler {
         let settings = self.settings_rx.borrow().clone();
         let mut current_interval_secs = settings.daemon.check_interval_secs;
         let mut tick_interval = tokio::time::interval(Duration::from_secs(current_interval_secs));
+        let mut context_interval = tokio::time::interval(Duration::from_secs(15)); // Check context every 15s
 
         info!("Scheduler started with {}s interval", current_interval_secs);
 
@@ -41,6 +48,9 @@ impl Scheduler {
             tokio::select! {
                 _ = tick_interval.tick() => {
                     self.tick().await;
+                }
+                _ = context_interval.tick() => {
+                    self.check_interruption().await;
                 }
                 result = self.settings_rx.changed() => {
                     if result.is_ok() {
@@ -61,6 +71,53 @@ impl Scheduler {
                     break;
                 }
             }
+        }
+    }
+
+    async fn check_interruption(&self) {
+        let in_progress_tasks = match self.state.storage.list_in_progress().await {
+            Ok(tasks) => tasks,
+            Err(_) => return,
+        };
+
+        if in_progress_tasks.is_empty() {
+            self.mismatch_counter
+                .store(0, std::sync::atomic::Ordering::Relaxed);
+            return;
+        }
+
+        let current_task = &in_progress_tasks[0];
+        let task_type = current_task.task_type();
+
+        let niri = match NiriClient::new() {
+            Ok(client) => client,
+            Err(_) => return, // Niri not running or accessible
+        };
+
+        let app_id = match niri.get_active_app_id() {
+            Ok(Some(id)) => id,
+            _ => return,
+        };
+
+        let title = niri.get_active_window_title().unwrap_or_default().unwrap_or_default();
+        let context_type = self.app_classifier.classify_with_title(&app_id, &title);
+
+        if context_type.name != task_type.name 
+            && context_type.name != "uncategorized"
+            && context_type.name != "default"
+        {
+            let count = self.mismatch_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if count >= 3 {
+                // Persistent mismatch (45 seconds) - record interruption
+                info!("Auto-detected interruption: doing {} while supposed to do {} (app: {})", 
+                    context_type.name, task_type.name, app_id);
+                
+                // Record interruption in learning model (silent for now, just for learning)
+                // This would call LearningManager::record_interruption if implemented
+                self.mismatch_counter.store(0, std::sync::atomic::Ordering::Relaxed);
+            }
+        } else {
+            self.mismatch_counter.store(0, std::sync::atomic::Ordering::Relaxed);
         }
     }
 

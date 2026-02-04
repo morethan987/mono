@@ -52,8 +52,9 @@ impl TaskRepository for SqliteStorage {
             INSERT INTO tasks (
                 id, title, description, priority, status, tags,
                 estimated_minutes, actual_minutes, deadline, scheduled_at,
-                started_at, completed_at, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                started_at, completed_at, parent_task_id, spawned_from_task_id,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&task.id)
@@ -68,6 +69,8 @@ impl TaskRepository for SqliteStorage {
         .bind(format_datetime_opt(&task.scheduled_at))
         .bind(format_datetime_opt(&task.started_at))
         .bind(format_datetime_opt(&task.completed_at))
+        .bind(&task.parent_task_id)
+        .bind(&task.spawned_from_task_id)
         .bind(format_datetime(&task.created_at))
         .bind(format_datetime(&task.updated_at))
         .execute(&self.pool)
@@ -81,7 +84,8 @@ impl TaskRepository for SqliteStorage {
             r#"
             SELECT id, title, description, priority, status, tags,
                    estimated_minutes, actual_minutes, deadline, scheduled_at,
-                   started_at, completed_at, created_at, updated_at
+                   started_at, completed_at, parent_task_id, spawned_from_task_id,
+                   created_at, updated_at
             FROM tasks WHERE id = ?
             "#,
         )
@@ -98,7 +102,8 @@ impl TaskRepository for SqliteStorage {
             r#"
             SELECT id, title, description, priority, status, tags,
                    estimated_minutes, actual_minutes, deadline, scheduled_at,
-                   started_at, completed_at, created_at, updated_at
+                   started_at, completed_at, parent_task_id, spawned_from_task_id,
+                   created_at, updated_at
             FROM tasks WHERE id LIKE ?
             LIMIT 1
             "#,
@@ -117,13 +122,14 @@ impl TaskRepository for SqliteStorage {
             Some(s) => {
                 sqlx::query(
                     r#"
-                    SELECT id, title, description, priority, status, tags,
-                           estimated_minutes, actual_minutes, deadline, scheduled_at,
-                           started_at, completed_at, created_at, updated_at
-                    FROM tasks
-                    WHERE status = ?
-                    ORDER BY priority DESC, deadline ASC, created_at DESC
-                    LIMIT ?
+SELECT id, title, description, priority, status, tags,
+                   estimated_minutes, actual_minutes, deadline, scheduled_at,
+                   started_at, completed_at, parent_task_id, spawned_from_task_id,
+                   created_at, updated_at
+            FROM tasks
+            WHERE status = ?
+            ORDER BY priority DESC, deadline ASC, created_at DESC
+            LIMIT ?
                     "#,
                 )
                 .bind(s.as_str())
@@ -134,11 +140,12 @@ impl TaskRepository for SqliteStorage {
             None => {
                 sqlx::query(
                     r#"
-                    SELECT id, title, description, priority, status, tags,
-                           estimated_minutes, actual_minutes, deadline, scheduled_at,
-                           started_at, completed_at, created_at, updated_at
-                    FROM tasks
-                    ORDER BY priority DESC, deadline ASC, created_at DESC
+SELECT id, title, description, priority, status, tags,
+                   estimated_minutes, actual_minutes, deadline, scheduled_at,
+                   started_at, completed_at, parent_task_id, spawned_from_task_id,
+                   created_at, updated_at
+            FROM tasks
+            ORDER BY priority DESC, deadline ASC, created_at DESC
                     LIMIT ?
                     "#,
                 )
@@ -212,7 +219,7 @@ impl TaskRepository for SqliteStorage {
             UPDATE tasks SET
                 title = ?, description = ?, priority = ?, status = ?, tags = ?,
                 estimated_minutes = ?, actual_minutes = ?, deadline = ?, scheduled_at = ?,
-                started_at = ?, completed_at = ?, updated_at = ?
+                started_at = ?, completed_at = ?, parent_task_id = ?, spawned_from_task_id = ?, updated_at = ?
             WHERE id = ?
             "#,
         )
@@ -227,6 +234,8 @@ impl TaskRepository for SqliteStorage {
         .bind(format_datetime_opt(&task.scheduled_at))
         .bind(format_datetime_opt(&task.started_at))
         .bind(format_datetime_opt(&task.completed_at))
+        .bind(&task.parent_task_id)
+        .bind(&task.spawned_from_task_id)
         .bind(format_datetime(&Utc::now()))
         .bind(&task.id)
         .execute(&self.pool)
@@ -252,6 +261,25 @@ impl TaskRepository for SqliteStorage {
         }
 
         Ok(())
+    }
+
+    async fn get_children(&self, parent_id: &str) -> Result<Vec<Task>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, title, description, priority, status, tags,
+                   estimated_minutes, actual_minutes, deadline, scheduled_at,
+                   started_at, completed_at, parent_task_id, spawned_from_task_id,
+                   created_at, updated_at
+            FROM tasks
+            WHERE parent_task_id = ?
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(parent_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(row_to_task).collect())
     }
 }
 
@@ -281,6 +309,8 @@ fn row_to_task(row: &sqlx::sqlite::SqliteRow) -> Task {
         completed_at: row
             .get::<Option<String>, _>("completed_at")
             .and_then(|s| parse_datetime(&s)),
+        parent_task_id: row.get("parent_task_id"),
+        spawned_from_task_id: row.get("spawned_from_task_id"),
         created_at: parse_datetime(row.get("created_at")).unwrap_or_else(Utc::now),
         updated_at: parse_datetime(row.get("updated_at")).unwrap_or_else(Utc::now),
     }
@@ -535,7 +565,8 @@ impl LearningRepository for SqliteStorage {
         let row = sqlx::query(
             r#"
             SELECT task_type, total_scheduled, total_completed, total_postponed, total_skipped,
-                   avg_completion_rate, avg_duration_minutes, best_time_slots, model_weights
+                   avg_completion_rate, avg_duration_minutes, sum_duration, sum_duration_sq, duration_count,
+                   best_time_slots, model_weights
             FROM task_type_stats WHERE task_type = ?
             "#,
         )
@@ -554,8 +585,9 @@ impl LearningRepository for SqliteStorage {
             r#"
             INSERT INTO task_type_stats (
                 task_type, total_scheduled, total_completed, total_postponed, total_skipped,
-                avg_completion_rate, avg_duration_minutes, best_time_slots, model_weights, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                avg_completion_rate, avg_duration_minutes, sum_duration, sum_duration_sq, duration_count,
+                best_time_slots, model_weights, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(task_type) DO UPDATE SET
                 total_scheduled = excluded.total_scheduled,
                 total_completed = excluded.total_completed,
@@ -563,6 +595,9 @@ impl LearningRepository for SqliteStorage {
                 total_skipped = excluded.total_skipped,
                 avg_completion_rate = excluded.avg_completion_rate,
                 avg_duration_minutes = excluded.avg_duration_minutes,
+                sum_duration = excluded.sum_duration,
+                sum_duration_sq = excluded.sum_duration_sq,
+                duration_count = excluded.duration_count,
                 best_time_slots = excluded.best_time_slots,
                 model_weights = excluded.model_weights,
                 updated_at = excluded.updated_at
@@ -575,6 +610,9 @@ impl LearningRepository for SqliteStorage {
         .bind(stats.total_skipped as i32)
         .bind(stats.avg_completion_rate)
         .bind(stats.avg_duration_minutes)
+        .bind(stats.sum_duration)
+        .bind(stats.sum_duration_sq)
+        .bind(stats.duration_count as i32)
         .bind(&best_time_slots_json)
         .bind(&stats.model_weights)
         .bind(format_datetime(&Utc::now()))
@@ -588,7 +626,8 @@ impl LearningRepository for SqliteStorage {
         let rows = sqlx::query(
             r#"
             SELECT task_type, total_scheduled, total_completed, total_postponed, total_skipped,
-                   avg_completion_rate, avg_duration_minutes, best_time_slots, model_weights
+                   avg_completion_rate, avg_duration_minutes, sum_duration, sum_duration_sq, duration_count,
+                   best_time_slots, model_weights
             FROM task_type_stats
             ORDER BY total_scheduled DESC
             "#,
@@ -677,6 +716,9 @@ fn row_to_task_type_stats(row: &sqlx::sqlite::SqliteRow) -> TaskTypeStats {
         total_skipped: row.get::<i32, _>("total_skipped") as u32,
         avg_completion_rate: row.get("avg_completion_rate"),
         avg_duration_minutes: row.get("avg_duration_minutes"),
+        sum_duration: row.get("sum_duration"),
+        sum_duration_sq: row.get("sum_duration_sq"),
+        duration_count: row.get::<i32, _>("duration_count") as u32,
         best_time_slots,
         model_weights: row.get("model_weights"),
     }

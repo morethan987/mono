@@ -1,3 +1,4 @@
+pub mod niri;
 mod traits;
 mod unix;
 

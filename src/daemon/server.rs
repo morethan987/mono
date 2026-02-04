@@ -213,6 +213,29 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
                                 "Updated learning model for completed task: {}",
                                 task.short_id()
                             );
+                            
+                            // Check for parent auto-completion
+                            if let Some(ref parent_id) = task.parent_task_id {
+                                if let Ok(children) = state.storage.get_children(parent_id).await {
+                                    let all_completed = children.iter().all(|t| t.status == TaskStatus::Completed);
+                                    if all_completed && !children.is_empty() {
+                                        // Auto-complete parent
+                                        if let Ok(Some(mut parent)) = state.storage.get(parent_id).await {
+                                            if parent.status != TaskStatus::Completed {
+                                                parent.status = TaskStatus::Completed;
+                                                parent.completed_at = Some(Utc::now());
+                                                parent.updated_at = Utc::now();
+                                                if let Err(e) = state.storage.update(&parent).await {
+                                                    debug!("Failed to auto-complete parent {}: {}", parent.short_id(), e);
+                                                } else {
+                                                    debug!("Auto-completed parent task: {}", parent.short_id());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
                             Response::task(task)
                         }
                         Err(e) => Response::error(format!("Failed to complete task: {}", e)),
@@ -575,6 +598,44 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
                 }
                 Ok(None) => Response::error(format!("Task not found: {}", id)),
                 Err(e) => Response::error(format!("Database error: {}", e)),
+            }
+        }
+
+        Request::SpawnTask {
+            title,
+            description,
+            priority,
+            tags,
+            estimated_minutes,
+        } => {
+            // Find current in-progress task
+            let in_progress = match state.storage.list_in_progress().await {
+                Ok(tasks) => tasks.into_iter().next(),
+                Err(e) => {
+                    return Response::error(format!("Failed to query tasks: {}", e));
+                }
+            };
+
+            let parent_id = match in_progress {
+                Some(ref task) => task.id.clone(),
+                None => {
+                    return Response::error(
+                        "No task in progress. Please start a task first with 'mono start <id>', or use 'mono add' to create an independent task.".to_string()
+                    );
+                }
+            };
+
+            // Create new task linked to parent
+            let mut new_task = Task::new(title);
+            new_task.description = description;
+            new_task.priority = priority.unwrap_or_default();
+            new_task.tags = tags;
+            new_task.estimated_minutes = estimated_minutes;
+            new_task.spawned_from_task_id = Some(parent_id);
+
+            match state.storage.create(&new_task).await {
+                Ok(()) => Response::task(new_task),
+                Err(e) => Response::error(format!("Failed to create task: {}", e)),
             }
         }
 

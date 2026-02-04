@@ -109,6 +109,14 @@ pub enum Request {
         id: String,
     },
 
+    SpawnTask {
+        title: String,
+        description: Option<String>,
+        priority: Option<Priority>,
+        tags: Vec<String>,
+        estimated_minutes: Option<u32>,
+    },
+
     InterruptTask {
         id: String,
         remaining_minutes: Option<u32>,
@@ -142,6 +150,7 @@ impl Request {
             Request::GetDaemonStatus => "get_daemon_status",
             Request::Replan => "replan",
             Request::StartTask { .. } => "start_task",
+            Request::SpawnTask { .. } => "spawn_task",
             Request::InterruptTask { .. } => "interrupt_task",
         }
     }

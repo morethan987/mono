@@ -47,6 +47,9 @@ mono/
 | Phase 3 | 交互式通知 | ✅ 完成 | Linux DBus 交互通知 + 按钮动作响应 |
 | Phase 4 | 在线学习 | ✅ 完成 | FTRL 模型 + Thompson Sampling Bandit |
 | Phase 5 | 自适应整合 | ✅ 完成 | 反馈闭环、模型持久化、交互式反馈、时段推荐 |
+| Phase 7-10 | 秘书化演进 | ✅ 完成 | 任务关联、衍生任务、智能推断、行为学习 |
+| Phase 11 | 环境感知 | ✅ 完成 | Niri IPC 接入、应用分类、标题分析 |
+| Phase 12 | 行为自动驾驶 | ✅ 完成 | Bayesian 时长预测、自动中断检测、时间衰减 |
 | Phase 6 | Web UI | ⏳ 待开始 | Web 控制面板 |
 
 ## LEARNING SYSTEM ARCHITECTURE

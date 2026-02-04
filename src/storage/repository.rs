@@ -12,6 +12,9 @@ pub struct TaskTypeStats {
     pub total_skipped: u32,
     pub avg_completion_rate: f64,
     pub avg_duration_minutes: Option<f64>,
+    pub sum_duration: f64,
+    pub sum_duration_sq: f64,
+    pub duration_count: u32,
     pub best_time_slots: Vec<String>,
     pub model_weights: String,
 }
@@ -26,6 +29,9 @@ impl TaskTypeStats {
             total_skipped: 0,
             avg_completion_rate: 0.0,
             avg_duration_minutes: None,
+            sum_duration: 0.0,
+            sum_duration_sq: 0.0,
+            duration_count: 0,
             best_time_slots: Vec::new(),
             model_weights: "{}".to_string(),
         }
@@ -55,6 +61,7 @@ pub trait TaskRepository: Send + Sync {
     async fn list_ready_for_notification(&self) -> Result<Vec<Task>>;
     async fn update(&self, task: &Task) -> Result<()>;
     async fn delete(&self, id: &str) -> Result<()>;
+    async fn get_children(&self, parent_id: &str) -> Result<Vec<Task>>;
 }
 
 #[async_trait]

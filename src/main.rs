@@ -17,13 +17,13 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::{
-    Cli, Commands, ConfigAction, DaemonAction, DaemonClient, InterruptArgs, StartArgs, StatsAction,
+    Cli, Commands, ConfigAction, DaemonAction, DaemonClient, InterruptArgs, NowArgs, SpawnArgs, StartArgs, StatsAction,
     format_ranked_task_list, format_task_detail, format_task_list, parse_deadline_with_work_end,
-    print_error, print_info, print_success, print_warning,
+    print_error, print_info, print_success, print_warning, CliPriority,
 };
 use crate::config::{MonoPaths, Settings};
 use crate::daemon::{daemon_status, run_daemon_background, run_daemon_foreground, stop_daemon};
-use crate::models::TaskStatus;
+use crate::models::{Priority, TaskStatus};
 use crate::protocol::{Request, Response, TimeSlotDetail};
 use owo_colors::OwoColorize;
 use tabled::{Table, Tabled, settings::Style};
@@ -81,7 +81,7 @@ async fn run(cli: Cli) -> error::Result<()> {
         Commands::Daemon { action } => handle_daemon(action, &paths).await,
         Commands::Add(args) => handle_add(args, &paths).await,
         Commands::List(args) => handle_list(args, &paths).await,
-        Commands::Now => handle_now(&paths).await,
+        Commands::Now(args) => handle_now(args, &paths).await,
         Commands::Today => handle_today(&paths).await,
         Commands::Complete(args) => handle_complete(args, &paths).await,
         Commands::Postpone(args) => handle_postpone(args, &paths).await,
@@ -90,6 +90,7 @@ async fn run(cli: Cli) -> error::Result<()> {
         Commands::Feedback(args) => handle_feedback(args, &paths).await,
         Commands::Replan => handle_replan(&paths).await,
         Commands::Start(args) => handle_start(args, &paths).await,
+        Commands::Spawn(args) => handle_spawn(args, &paths).await,
         Commands::Interrupt(args) => handle_interrupt(args, &paths).await,
         Commands::Stats { action } => handle_stats(action, &paths).await,
         Commands::Config { action } => handle_config(action, &paths),
@@ -208,15 +209,53 @@ async fn handle_list(args: cli::ListArgs, paths: &MonoPaths) -> error::Result<()
     Ok(())
 }
 
-async fn handle_now(paths: &MonoPaths) -> error::Result<()> {
+async fn handle_now(args: NowArgs, paths: &MonoPaths) -> error::Result<()> {
     let settings = Settings::load(&paths.config_file()).unwrap_or_default();
     let mut client = DaemonClient::connect(&paths.socket, settings.daemon.ipc_timeout_secs).await?;
 
+    // Handle --all flag - show all pending tasks
+    if args.all {
+        let response = client.request(Request::ListTasks { status: Some(TaskStatus::Pending), limit: Some(100) }).await?;
+        match response {
+            Response::TaskList { tasks } => {
+                if tasks.is_empty() {
+                    print_info("没有待办任务，享受当下吧！🎉");
+                } else {
+                    println!("\n📋 所有待办任务 ({} 项):\n", tasks.len());
+                    println!("{}", format_task_list(&tasks));
+                }
+            }
+            _ => print_error("获取任务列表失败"),
+        }
+        return Ok(());
+    }
+
+    // Handle --queue flag - show top 5 ranked tasks
+    if args.queue {
+        let response = client.request(Request::Replan).await?;
+        match response {
+            Response::RankedTasks { tasks } => {
+                if tasks.is_empty() {
+                    print_info("没有待办任务，享受当下吧！🎉");
+                } else {
+                    let top_tasks: Vec<_> = tasks.into_iter().take(5).collect();
+                    println!("\n📊 任务优先级队列 (前 {} 项):\n", top_tasks.len());
+                    println!("{}", format_ranked_task_list(&top_tasks));
+                }
+            }
+            _ => print_error("获取任务队列失败"),
+        }
+        return Ok(());
+    }
+
+    // Default focus mode - show single most important task
     let response = client.request(Request::GetCurrentTask).await?;
 
     match response {
         Response::CurrentTask { task: Some(task) } => {
-            println!("\n📌 现在应该做:\n");
+            println!("\n╔════════════════════════════════════════╗");
+            println!("║           🎯 当前专注任务               ║");
+            println!("╚════════════════════════════════════════╝\n");
             println!("{}", format_task_detail(&task));
 
             let rec_response = client
@@ -237,6 +276,13 @@ async fn handle_now(paths: &MonoPaths) -> error::Result<()> {
                     confidence * 100.0
                 );
             }
+            
+            println!("\n─────────────────────────────────────────");
+            println!("  可用命令:");
+            println!("    mono complete {}  - 完成任务", task.short_id());
+            println!("    mono spawn '子任务' - 创建关联任务",);
+            println!("    mono now --queue   - 查看任务队列");
+            println!("─────────────────────────────────────────");
         }
         Response::CurrentTask { task: None } => {
             print_info("没有待办任务，享受当下吧！🎉");
@@ -333,6 +379,46 @@ async fn handle_start(args: StartArgs, paths: &MonoPaths) -> error::Result<()> {
                 println!("\n💡 系统原本推荐: {}", rec.title);
                 print_info("已记录您的选择偏好，将用于优化未来推荐");
             }
+        }
+        Response::Error { message } => {
+            print_error(&message);
+        }
+        _ => {
+            print_error("意外的响应");
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_spawn(args: SpawnArgs, paths: &MonoPaths) -> error::Result<()> {
+    let settings = Settings::load(&paths.config_file()).unwrap_or_default();
+    let mut client = DaemonClient::connect(&paths.socket, settings.daemon.ipc_timeout_secs).await?;
+
+    let priority = args.priority.map(|p| match p {
+        CliPriority::Low => Priority::Low,
+        CliPriority::Medium => Priority::Medium,
+        CliPriority::High => Priority::High,
+        CliPriority::Urgent => Priority::Urgent,
+    });
+
+    let response = client
+        .request(Request::SpawnTask {
+            title: args.title.clone(),
+            description: args.description,
+            priority,
+            tags: args.tag,
+            estimated_minutes: args.estimated,
+        })
+        .await?;
+
+    match response {
+        Response::Task { task } => {
+            print_success(&format!("已创建衍生任务: {}", task.title));
+            if let Some(ref parent_id) = task.spawned_from_task_id {
+                println!("  关联到父任务: {}", parent_id[..8.min(parent_id.len())].to_string());
+            }
+            println!("  ID: {}", task.short_id());
         }
         Response::Error { message } => {
             print_error(&message);

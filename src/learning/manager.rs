@@ -1,5 +1,6 @@
 use crate::learning::{
     bandit::{TimeSlotArm, TimeSlotBandit},
+    duration::{BayesianDurationPredictor, DurationStats},
     features::FeatureExtractor,
     ftrl::FtrlModel,
     reward::{feedback_to_label, is_success},
@@ -14,6 +15,7 @@ pub struct TaskTypeLearningModel {
     pub task_type: TaskType,
     pub time_slot_bandit: TimeSlotBandit,
     pub ftrl_model: FtrlModel,
+    pub duration_stats: DurationStats,
     pub total_scheduled: u32,
     pub total_completed: u32,
     pub total_postponed: u32,
@@ -27,6 +29,7 @@ impl TaskTypeLearningModel {
             task_type,
             time_slot_bandit: TimeSlotBandit::new(),
             ftrl_model: FtrlModel::new(),
+            duration_stats: DurationStats::new(),
             total_scheduled: 0,
             total_completed: 0,
             total_postponed: 0,
@@ -67,11 +70,27 @@ impl TaskTypeLearningModel {
         self.ftrl_model.update(&features, label);
 
         if let Some(actual) = feedback.actual_duration_minutes {
+            self.duration_stats.update(actual);
             self.avg_duration_minutes = Some(match self.avg_duration_minutes {
                 Some(avg) => avg * 0.9 + actual as f64 * 0.1,
                 None => actual as f64,
             });
         }
+    }
+
+    pub fn predict_duration(&self) -> (f64, f64) {
+        BayesianDurationPredictor::predict(&self.duration_stats)
+    }
+
+    /// Apply time-based decay to this model
+    pub fn apply_time_decay(&mut self, factor: f64) {
+        self.total_scheduled = (self.total_scheduled as f64 * factor).round() as u32;
+        self.total_completed = (self.total_completed as f64 * factor).round() as u32;
+        self.total_postponed = (self.total_postponed as f64 * factor).round() as u32;
+        self.total_skipped = (self.total_skipped as f64 * factor).round() as u32;
+
+        self.time_slot_bandit.apply_decay(factor);
+        self.duration_stats.apply_decay(factor);
     }
 
     pub fn best_time_slot(&self) -> TimeSlotArm {
@@ -304,6 +323,17 @@ impl LearningManager {
 
     pub fn task_type_names(&self) -> Vec<String> {
         self.models.keys().cloned().collect()
+    }
+
+    /// Apply time-based decay to all models
+    pub fn apply_time_decay(&mut self, factor: f64) {
+        self.global_model.time_slot_bandit.apply_decay(factor);
+        self.global_model.total_tasks =
+            (self.global_model.total_tasks as f64 * factor).round() as u32;
+
+        for model in self.models.values_mut() {
+            model.apply_time_decay(factor);
+        }
     }
 }
 

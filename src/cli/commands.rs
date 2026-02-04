@@ -28,7 +28,7 @@ pub enum Commands {
     List(ListArgs),
 
     #[command(about = "查看当前应该做什么")]
-    Now,
+    Now(NowArgs),
 
     #[command(about = "查看今日日程")]
     Today,
@@ -53,6 +53,9 @@ pub enum Commands {
 
     #[command(about = "开始执行任务")]
     Start(StartArgs),
+
+    #[command(about = "衍生新任务（关联到当前进行中的任务）")]
+    Spawn(SpawnArgs),
 
     #[command(about = "中断当前任务")]
     Interrupt(InterruptArgs),
@@ -90,24 +93,27 @@ pub struct AddArgs {
     #[arg(help = "任务标题")]
     pub title: String,
 
-    #[arg(short, long, help = "优先级")]
+    #[arg(short, long, help = "优先级（可选，未指定时将自动推断）")]
     pub priority: Option<CliPriority>,
 
     #[arg(
         short,
         long,
-        help = "截止日期 (YYYY-MM-DD [HH:MM] 或 today/tomorrow [HH:MM])"
+        help = "截止日期 (YYYY-MM-DD [HH:MM] 或 today/tomorrow [HH:MM]，可选)"
     )]
     pub deadline: Option<String>,
 
-    #[arg(short = 't', long, help = "标签（可多次使用）")]
+    #[arg(short = 't', long, help = "标签（可多次使用，可选）")]
     pub tag: Vec<String>,
 
-    #[arg(short, long, help = "预计时长（分钟）")]
+    #[arg(short, long, help = "预计时长（分钟，可选，未指定时将自动推断）")]
     pub estimated: Option<u32>,
 
-    #[arg(long, help = "任务描述")]
+    #[arg(long, help = "任务描述（可选）")]
     pub description: Option<String>,
+
+    #[arg(long, help = "启用智能推断（根据历史自动推断优先级和时长）")]
+    pub infer: bool,
 }
 
 #[derive(Args)]
@@ -150,12 +156,39 @@ pub struct StartArgs {
 }
 
 #[derive(Args)]
+pub struct SpawnArgs {
+    #[arg(help = "衍生任务标题")]
+    pub title: String,
+
+    #[arg(short, long, help = "优先级（可选）")]
+    pub priority: Option<CliPriority>,
+
+    #[arg(short = 't', long, help = "标签（可多次使用，可选）")]
+    pub tag: Vec<String>,
+
+    #[arg(short, long, help = "预计时长（分钟，可选）")]
+    pub estimated: Option<u32>,
+
+    #[arg(long, help = "任务描述（可选）")]
+    pub description: Option<String>,
+}
+
+#[derive(Args)]
 pub struct InterruptArgs {
     #[arg(help = "任务 ID（可使用短 ID，默认为当前进行中的任务）")]
     pub id: Option<String>,
 
     #[arg(short, long, help = "剩余时间（分钟），不指定则自动计算")]
     pub remaining: Option<u32>,
+}
+
+#[derive(Args)]
+pub struct NowArgs {
+    #[arg(long, help = "显示任务队列（前5个）")]
+    pub queue: bool,
+
+    #[arg(long, help = "显示所有待办任务")]
+    pub all: bool,
 }
 
 #[derive(Args)]

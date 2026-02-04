@@ -114,6 +114,8 @@ pub struct Task {
     pub scheduled_at: Option<DateTime<Utc>>,
     pub started_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
+    pub parent_task_id: Option<String>,
+    pub spawned_from_task_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -134,6 +136,8 @@ impl Task {
             scheduled_at: None,
             started_at: None,
             completed_at: None,
+            parent_task_id: None,
+            spawned_from_task_id: None,
             created_at: now,
             updated_at: now,
         }
@@ -161,6 +165,16 @@ impl Task {
 
     pub fn with_description(mut self, description: String) -> Self {
         self.description = Some(description);
+        self
+    }
+
+    pub fn with_parent(mut self, parent_id: String) -> Self {
+        self.parent_task_id = Some(parent_id);
+        self
+    }
+
+    pub fn spawned_from(mut self, source_id: String) -> Self {
+        self.spawned_from_task_id = Some(source_id);
         self
     }
 

@@ -81,8 +81,57 @@ mod feature_index {
     // Is weekend: index 204
     pub const IS_WEEKEND: u32 = 204;
 
+    // Behavioral features (indices 205-208)
+    // Postpone count for this task type (normalized 0.0-1.0)
+    pub const POSTPONE_COUNT: u32 = 205;
+    // Time since last interruption (minutes, normalized)
+    pub const TIME_SINCE_INTERRUPTION: u32 = 206;
+    // Current completion streak
+    pub const CURRENT_STREAK: u32 = 207;
+    // Tasks completed today (normalized)
+    pub const DAILY_COMPLETED_COUNT: u32 = 208;
+
     // Reserved for future features
     pub const _RESERVED_BASE: u32 = 300;
+}
+
+/// Behavioral context for feature extraction.
+#[derive(Debug, Clone, Default)]
+pub struct BehavioralContext {
+    /// Number of times this task type has been postponed recently
+    pub postpone_count: u32,
+    /// Minutes since last interruption (None if no interruptions today)
+    pub minutes_since_interruption: Option<u32>,
+    /// Current consecutive completion streak
+    pub current_streak: u32,
+    /// Number of tasks completed today
+    pub daily_completed_count: u32,
+}
+
+impl BehavioralContext {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_postpone_count(mut self, count: u32) -> Self {
+        self.postpone_count = count;
+        self
+    }
+
+    pub fn with_minutes_since_interruption(mut self, minutes: u32) -> Self {
+        self.minutes_since_interruption = Some(minutes);
+        self
+    }
+
+    pub fn with_current_streak(mut self, streak: u32) -> Self {
+        self.current_streak = streak;
+        self
+    }
+
+    pub fn with_daily_completed(mut self, count: u32) -> Self {
+        self.daily_completed_count = count;
+        self
+    }
 }
 
 /// Feature extractor for tasks.
@@ -99,8 +148,18 @@ impl FeatureExtractor {
         }
     }
 
-    /// Extract features from a task and scheduling context.
+    /// Extract features from a task and scheduling context (legacy, without behavioral data).
     pub fn extract(&self, task: &Task, now: DateTime<Utc>) -> FeatureVector {
+        self.extract_with_behavior(task, now, &BehavioralContext::default())
+    }
+
+    /// Extract features from a task with behavioral context.
+    pub fn extract_with_behavior(
+        &self,
+        task: &Task,
+        now: DateTime<Utc>,
+        behavior: &BehavioralContext,
+    ) -> FeatureVector {
         let mut features = FeatureVector::new();
 
         // Hour of day (one-hot: 24 features)
@@ -168,6 +227,26 @@ impl FeatureExtractor {
         let task_type = task.task_type();
         let type_hash = self.hash_task_type(&task_type);
         features.add_binary(feature_index::TASK_TYPE_BASE + type_hash);
+
+        // Behavioral features (normalized to 0.0-1.0 range)
+        // Postpone count: normalize by capping at 10
+        let postpone_normalized = (behavior.postpone_count.min(10) as f64) / 10.0;
+        features.add(feature_index::POSTPONE_COUNT, postpone_normalized);
+
+        // Time since last interruption: normalize by capping at 120 minutes (2 hours)
+        let time_since_norm = behavior
+            .minutes_since_interruption
+            .map(|m| (m.min(120) as f64) / 120.0)
+            .unwrap_or(1.0); // No interruption = maximum value
+        features.add(feature_index::TIME_SINCE_INTERRUPTION, time_since_norm);
+
+        // Current streak: normalize by capping at 10
+        let streak_normalized = (behavior.current_streak.min(10) as f64) / 10.0;
+        features.add(feature_index::CURRENT_STREAK, streak_normalized);
+
+        // Daily completed count: normalize by capping at 20 tasks
+        let daily_normalized = (behavior.daily_completed_count.min(20) as f64) / 20.0;
+        features.add(feature_index::DAILY_COMPLETED_COUNT, daily_normalized);
 
         features
     }

@@ -4,8 +4,8 @@ mod display;
 
 pub use client::DaemonClient;
 pub use commands::{
-    AddArgs, Cli, Commands, CompleteArgs, ConfigAction, DaemonAction, DeleteArgs, FeedbackArgs,
-    InterruptArgs, ListArgs, PostponeArgs, StartArgs, StatsAction, UpdateArgs,
+    AddArgs, Cli, CliPriority, Commands, CompleteArgs, ConfigAction, DaemonAction, DeleteArgs, FeedbackArgs,
+    InterruptArgs, ListArgs, NowArgs, PostponeArgs, SpawnArgs, StartArgs, StatsAction, UpdateArgs,
     parse_deadline_with_work_end,
 };
 pub use display::{
