@@ -31,7 +31,6 @@ impl SchedulingPolicy for GuidancePolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::Priority;
     use chrono::{Duration, Utc};
 
     #[test]

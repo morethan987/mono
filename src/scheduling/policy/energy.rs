@@ -38,8 +38,6 @@ impl SchedulingPolicy for EnergyPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::Priority;
-    use chrono::Utc;
 
     #[test]
     fn test_energy_policy_rest_boost() {

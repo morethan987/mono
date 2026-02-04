@@ -174,7 +174,8 @@ SELECT id, title, description, priority, status, tags,
             r#"
             SELECT id, title, description, priority, status, tags,
                    estimated_minutes, actual_minutes, deadline, scheduled_at,
-                   started_at, completed_at, created_at, updated_at
+                   started_at, completed_at, parent_task_id, spawned_from_task_id,
+                   created_at, updated_at
             FROM tasks
             WHERE (scheduled_at BETWEEN ? AND ?)
                OR (deadline BETWEEN ? AND ?)
@@ -198,7 +199,8 @@ SELECT id, title, description, priority, status, tags,
             r#"
             SELECT id, title, description, priority, status, tags,
                    estimated_minutes, actual_minutes, deadline, scheduled_at,
-                   started_at, completed_at, created_at, updated_at
+                   started_at, completed_at, parent_task_id, spawned_from_task_id,
+                   created_at, updated_at
             FROM tasks
             WHERE status = 'pending'
               AND (scheduled_at IS NULL OR scheduled_at <= ?)

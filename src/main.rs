@@ -17,9 +17,10 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::{
-    Cli, Commands, ConfigAction, DaemonAction, DaemonClient, InterruptArgs, NowArgs, SpawnArgs, StartArgs, StatsAction,
-    format_ranked_task_list, format_task_detail, format_task_list, parse_deadline_with_work_end,
-    print_error, print_info, print_success, print_warning, CliPriority,
+    Cli, CliPriority, Commands, ConfigAction, DaemonAction, DaemonClient, InterruptArgs, NowArgs,
+    SpawnArgs, StartArgs, StatsAction, format_ranked_task_list, format_task_detail,
+    format_task_list, parse_deadline_with_work_end, print_error, print_info, print_success,
+    print_warning,
 };
 use crate::config::{MonoPaths, Settings};
 use crate::daemon::{daemon_status, run_daemon_background, run_daemon_foreground, stop_daemon};
@@ -215,7 +216,12 @@ async fn handle_now(args: NowArgs, paths: &MonoPaths) -> error::Result<()> {
 
     // Handle --all flag - show all pending tasks
     if args.all {
-        let response = client.request(Request::ListTasks { status: Some(TaskStatus::Pending), limit: Some(100) }).await?;
+        let response = client
+            .request(Request::ListTasks {
+                status: Some(TaskStatus::Pending),
+                limit: Some(100),
+            })
+            .await?;
         match response {
             Response::TaskList { tasks } => {
                 if tasks.is_empty() {
@@ -254,7 +260,7 @@ async fn handle_now(args: NowArgs, paths: &MonoPaths) -> error::Result<()> {
     match response {
         Response::CurrentTask { task: Some(task) } => {
             println!("\n╔════════════════════════════════════════╗");
-            println!("║           🎯 当前专注任务               ║");
+            println!("║           🎯 当前专注任务              ║");
             println!("╚════════════════════════════════════════╝\n");
             println!("{}", format_task_detail(&task));
 
@@ -276,7 +282,7 @@ async fn handle_now(args: NowArgs, paths: &MonoPaths) -> error::Result<()> {
                     confidence * 100.0
                 );
             }
-            
+
             println!("\n─────────────────────────────────────────");
             println!("  可用命令:");
             println!("    mono complete {}  - 完成任务", task.short_id());
@@ -416,7 +422,10 @@ async fn handle_spawn(args: SpawnArgs, paths: &MonoPaths) -> error::Result<()> {
         Response::Task { task } => {
             print_success(&format!("已创建衍生任务: {}", task.title));
             if let Some(ref parent_id) = task.spawned_from_task_id {
-                println!("  关联到父任务: {}", parent_id[..8.min(parent_id.len())].to_string());
+                println!(
+                    "  关联到父任务: {}",
+                    parent_id[..8.min(parent_id.len())].to_string()
+                );
             }
             println!("  ID: {}", task.short_id());
         }

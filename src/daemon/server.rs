@@ -745,12 +745,14 @@ fn model_to_inspection_stats(
         }
     };
 
+    let (mean, var) = model.predict_duration();
     crate::protocol::TaskTypeModelStats {
         task_type: model.task_type.name.clone(),
         total_scheduled: model.total_scheduled,
         total_completed: model.total_completed,
         total_postponed: model.total_postponed,
         total_skipped: model.total_skipped,
+        total_interrupted: model.total_interrupted,
         completion_rate: model.completion_rate(),
         best_time_slot: format!("{:?}", model.best_time_slot()),
         time_slots: crate::protocol::TimeSlotStatsData {
@@ -759,7 +761,8 @@ fn model_to_inspection_stats(
             evening: slot_detail(TimeSlotArm::Evening),
             night: slot_detail(TimeSlotArm::Night),
         },
-        avg_duration_minutes: model.avg_duration_minutes,
+        avg_duration_minutes: Some(mean),
+        duration_variance: Some(var),
         ftrl_weights_count: model.ftrl_weights_count(),
     }
 }

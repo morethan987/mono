@@ -112,7 +112,7 @@ pub struct AddArgs {
     #[arg(long, help = "任务描述（可选）")]
     pub description: Option<String>,
 
-    #[arg(long, help = "启用智能推断（根据历史自动推断优先级和时长）")]
+    #[arg(short, long, help = "启用智能推断（根据历史自动推断优先级和时长）")]
     pub infer: bool,
 }
 

@@ -104,10 +104,12 @@ pub struct TaskTypeStatsData {
     pub total_scheduled: u32,
     pub total_completed: u32,
     pub total_postponed: u32,
+    #[serde(default)]
     pub total_interrupted: u32,
     pub completion_rate: f64,
     pub best_time_slot: String,
     pub avg_duration_minutes: Option<f64>,
+    #[serde(default)]
     pub duration_variance: Option<f64>,
 }
 
@@ -140,10 +142,14 @@ pub struct TaskTypeModelStats {
     pub total_completed: u32,
     pub total_postponed: u32,
     pub total_skipped: u32,
+    #[serde(default)]
+    pub total_interrupted: u32,
     pub completion_rate: f64,
     pub best_time_slot: String,
     pub time_slots: TimeSlotStatsData,
     pub avg_duration_minutes: Option<f64>,
+    #[serde(default)]
+    pub duration_variance: Option<f64>,
     pub ftrl_weights_count: usize,
 }
 
