@@ -79,32 +79,8 @@ impl Feedback {
         feedback
     }
 
-    pub fn skipped(task_id: String) -> Self {
-        Self::new(task_id, FeedbackType::Skipped)
-    }
-
     pub fn interrupted(task_id: String) -> Self {
         Self::new(task_id, FeedbackType::Interrupted)
-    }
-
-    pub fn with_rating(mut self, rating: u8) -> Self {
-        self.rating = Some(rating.min(5));
-        self
-    }
-
-    pub fn with_notes(mut self, notes: String) -> Self {
-        self.notes = Some(notes);
-        self
-    }
-
-    pub fn with_difficulty(mut self, difficulty: u8) -> Self {
-        self.difficulty_rating = Some(difficulty.min(5));
-        self
-    }
-
-    pub fn with_energy_level(mut self, energy: u8) -> Self {
-        self.energy_level = Some(energy.min(5));
-        self
     }
 }
 

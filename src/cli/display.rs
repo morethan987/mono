@@ -88,15 +88,6 @@ fn status_icon(status: &TaskStatus) -> String {
     }
 }
 
-fn priority_code(priority: &Priority) -> String {
-    match priority {
-        Priority::Low => "L".dimmed().to_string(),
-        Priority::Medium => "M".blue().to_string(),
-        Priority::High => "H".yellow().to_string(),
-        Priority::Urgent => "U".red().bold().to_string(),
-    }
-}
-
 fn priority_icon(priority: &Priority) -> String {
     match priority {
         Priority::Low => "🟢".to_string(),
@@ -104,40 +95,6 @@ fn priority_icon(priority: &Priority) -> String {
         Priority::High => "🟠".to_string(),
         Priority::Urgent => "🔴".to_string(),
     }
-}
-
-pub fn format_task_short(task: &Task) -> String {
-    let status_icon = match task.status {
-        TaskStatus::Pending => "○".white().to_string(),
-        TaskStatus::InProgress => "◐".yellow().to_string(),
-        TaskStatus::Completed => "●".green().to_string(),
-        TaskStatus::Cancelled => "✕".red().to_string(),
-        TaskStatus::Postponed => "◑".cyan().to_string(),
-    };
-
-    let priority_icon = match task.priority {
-        Priority::Low => "↓".dimmed().to_string(),
-        Priority::Medium => "→".white().to_string(),
-        Priority::High => "↑".yellow().to_string(),
-        Priority::Urgent => "⚡".red().to_string(),
-    };
-
-    let deadline_str = task.deadline.map(format_relative_time).unwrap_or_default();
-
-    let duration_str = task
-        .estimated_minutes
-        .map(|m| format!("[{}]", format_duration(m)))
-        .unwrap_or_default();
-
-    format!(
-        "{} {} {} {} {} {}",
-        task.short_id().dimmed(),
-        status_icon,
-        priority_icon,
-        task.title,
-        duration_str.dimmed(),
-        deadline_str.dimmed()
-    )
 }
 
 pub fn format_task_detail(task: &Task) -> String {

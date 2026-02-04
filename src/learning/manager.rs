@@ -279,18 +279,6 @@ impl LearningManager {
         &self.global_model
     }
 
-    pub fn time_slot_success_rate(&self, task: &Task, arm: TimeSlotArm) -> f64 {
-        let task_type = task.task_type();
-
-        if let Some(model) = self.models.get(&task_type.name)
-            && model.total_scheduled >= 5
-        {
-            return model.time_slot_bandit.success_rate(arm);
-        }
-
-        self.global_model.time_slot_bandit.success_rate(arm)
-    }
-
     pub fn reset(&mut self, task_type: Option<&str>) {
         match task_type {
             Some(tt) => {
@@ -337,10 +325,6 @@ impl LearningManager {
 
     pub fn get_global_ftrl_weights_count(&self) -> usize {
         self.global_model.ftrl_model.weights_count()
-    }
-
-    pub fn task_type_names(&self) -> Vec<String> {
-        self.models.keys().cloned().collect()
     }
 
     /// Apply time-based decay to all models

@@ -79,11 +79,6 @@ impl SchedulingEngine {
     ) -> Option<ScoredTask> {
         self.rank_tasks(tasks, context).into_iter().next()
     }
-
-    pub fn build_queue(&self, tasks: Vec<Task>, context: &SchedulingContext) -> TaskQueue {
-        let scored = self.rank_tasks(tasks, context);
-        scored.into_iter().collect()
-    }
 }
 
 impl Default for SchedulingEngine {

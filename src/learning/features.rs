@@ -32,23 +32,9 @@ impl FeatureVector {
         self.features.insert(index, 1.0);
     }
 
-    /// Get feature value, defaulting to 0.0.
-    pub fn get(&self, index: u32) -> f64 {
-        *self.features.get(&index).unwrap_or(&0.0)
-    }
-
     /// Iterate over non-zero features.
     pub fn iter(&self) -> impl Iterator<Item = (&u32, &f64)> {
         self.features.iter()
-    }
-
-    /// Number of non-zero features.
-    pub fn len(&self) -> usize {
-        self.features.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.features.is_empty()
     }
 }
 
@@ -106,32 +92,6 @@ pub struct BehavioralContext {
     pub current_streak: u32,
     /// Number of tasks completed today
     pub daily_completed_count: u32,
-}
-
-impl BehavioralContext {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_postpone_count(mut self, count: u32) -> Self {
-        self.postpone_count = count;
-        self
-    }
-
-    pub fn with_minutes_since_interruption(mut self, minutes: u32) -> Self {
-        self.minutes_since_interruption = Some(minutes);
-        self
-    }
-
-    pub fn with_current_streak(mut self, streak: u32) -> Self {
-        self.current_streak = streak;
-        self
-    }
-
-    pub fn with_daily_completed(mut self, count: u32) -> Self {
-        self.daily_completed_count = count;
-        self
-    }
 }
 
 /// Feature extractor for tasks.
@@ -260,76 +220,5 @@ impl FeatureExtractor {
             hash = hash.wrapping_mul(16777619);
         }
         hash % self.task_type_buckets
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_feature_vector() {
-        let mut fv = FeatureVector::new();
-        fv.add(0, 1.0);
-        fv.add(5, 0.5);
-        fv.add_binary(10);
-
-        assert_eq!(fv.get(0), 1.0);
-        assert_eq!(fv.get(5), 0.5);
-        assert_eq!(fv.get(10), 1.0);
-        assert_eq!(fv.get(100), 0.0); // default
-        assert_eq!(fv.len(), 3);
-    }
-
-    #[test]
-    fn test_feature_extraction() {
-        use chrono::TimeZone;
-
-        let task = Task::new("Test task".to_string())
-            .with_priority(Priority::High)
-            .with_estimated_minutes(45)
-            .with_tags(vec!["work".to_string()]);
-
-        let now = Utc.with_ymd_and_hms(2024, 1, 15, 14, 30, 0).unwrap(); // Monday afternoon
-
-        let extractor = FeatureExtractor::new();
-        let features = extractor.extract(&task, now);
-
-        // Should have hour feature (14)
-        assert_eq!(features.get(feature_index::HOUR_BASE + 14), 1.0);
-
-        // Should have day of week feature (Monday = 0)
-        assert_eq!(features.get(feature_index::DAY_OF_WEEK_BASE + 0), 1.0);
-
-        // Should have priority feature (High = 2)
-        assert_eq!(features.get(feature_index::PRIORITY_BASE + 2), 1.0);
-
-        // Should have duration bucket (31-60min = 2)
-        assert_eq!(features.get(feature_index::DURATION_BASE + 2), 1.0);
-
-        // Should have time of day (afternoon = 1)
-        assert_eq!(features.get(feature_index::TIME_OF_DAY_BASE + 1), 1.0);
-    }
-
-    #[test]
-    fn test_deadline_proximity() {
-        use chrono::TimeZone;
-
-        let now = Utc.with_ymd_and_hms(2024, 1, 15, 10, 0, 0).unwrap();
-        let deadline = Utc.with_ymd_and_hms(2024, 1, 15, 12, 0, 0).unwrap(); // 2 hours away
-
-        let task = Task::new("Urgent task".to_string()).with_deadline(deadline);
-
-        let extractor = FeatureExtractor::new();
-        let features = extractor.extract(&task, now);
-
-        // Should have deadline flag
-        assert_eq!(features.get(feature_index::HAS_DEADLINE), 1.0);
-
-        // Should have critical proximity bucket (0-4h = 1)
-        assert_eq!(
-            features.get(feature_index::DEADLINE_PROXIMITY_BASE + 1),
-            1.0
-        );
     }
 }

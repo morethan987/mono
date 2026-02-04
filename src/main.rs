@@ -1,6 +1,3 @@
-// Allow dead code during development - many features are staged for future use
-#![allow(dead_code)]
-
 mod cli;
 mod config;
 mod daemon;

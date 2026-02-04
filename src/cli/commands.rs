@@ -331,11 +331,6 @@ impl From<CliPriority> for Priority {
     }
 }
 
-/// 解析截止日期字符串，默认使用工作时间结束时刻作为截止时间
-pub fn parse_deadline(s: &str) -> Option<DateTime<Utc>> {
-    parse_deadline_with_work_end(s, 18)
-}
-
 /// 解析截止日期字符串，使用指定的工作结束时间（小时）
 ///
 /// 支持的格式：

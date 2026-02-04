@@ -171,8 +171,4 @@ impl Response {
     pub fn task_list(tasks: Vec<Task>) -> Self {
         Response::TaskList { tasks }
     }
-
-    pub fn is_error(&self) -> bool {
-        matches!(self, Response::Error { .. })
-    }
 }

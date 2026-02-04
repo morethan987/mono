@@ -53,11 +53,4 @@ impl DaemonClient {
 
         decode_response(&line)
     }
-
-    pub async fn ping(&mut self) -> Result<bool> {
-        match self.request(Request::Ping).await? {
-            Response::Pong => Ok(true),
-            _ => Ok(false),
-        }
-    }
 }
