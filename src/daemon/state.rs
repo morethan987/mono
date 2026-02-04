@@ -6,9 +6,9 @@ use tokio::sync::RwLock;
 use crate::config::{MonoPaths, Settings};
 use crate::learning::LearningManager;
 use crate::notification::LinuxNotificationBackend;
-use crate::scheduling::SchedulingEngine;
+use crate::scheduling::{SchedulingContext, SchedulingEngine};
 use crate::scheduling::policy::LearningPolicy;
-use crate::storage::SqliteStorage;
+use crate::storage::{SqliteStorage, TaskRepository};
 
 const SAVE_AFTER_N_UPDATES: u32 = 10;
 
@@ -19,6 +19,7 @@ pub struct DaemonState {
     pub scheduler: SchedulingEngine,
     pub notification_backend: RwLock<Option<LinuxNotificationBackend>>,
     pub learning_manager: Arc<RwLock<LearningManager>>,
+    pub mismatch_counter: std::sync::atomic::AtomicU32,
     shutdown_requested: Arc<RwLock<bool>>,
     learning_updates_since_save: AtomicU32,
     initial_notification_enabled: bool,
@@ -53,10 +54,30 @@ impl DaemonState {
             scheduler,
             notification_backend: RwLock::new(None),
             learning_manager,
+            mismatch_counter: std::sync::atomic::AtomicU32::new(0),
             shutdown_requested: Arc::new(RwLock::new(false)),
             learning_updates_since_save: AtomicU32::new(0),
             initial_notification_enabled: settings.notification.enabled,
         }
+    }
+
+    pub async fn build_context(&self) -> SchedulingContext {
+        let mut context = SchedulingContext::new();
+
+        let in_progress = match self.storage.list_in_progress().await {
+            Ok(tasks) => tasks,
+            Err(_) => Vec::new(),
+        };
+
+        if let Some(task) = in_progress.first() {
+            if let Some(start) = task.started_at {
+                let duration = Utc::now().signed_duration_since(start);
+                context.current_session_duration = duration.num_minutes().max(0) as u32;
+            }
+        }
+
+        context.session_interruptions = self.mismatch_counter.load(std::sync::atomic::Ordering::Relaxed);
+        context
     }
 
     pub async fn init_notification_backend(&self) {

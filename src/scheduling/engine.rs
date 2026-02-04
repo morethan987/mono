@@ -19,6 +19,8 @@ impl SchedulingEngine {
         let mut engine = Self::new();
         engine.add_policy(Box::new(PriorityPolicy::new()));
         engine.add_policy(Box::new(DeadlinePolicy::new()));
+        engine.add_policy(Box::new(crate::scheduling::policy::EnergyPolicy::new()));
+        engine.add_policy(Box::new(crate::scheduling::policy::GuidancePolicy::new()));
         engine
     }
 
@@ -70,9 +72,12 @@ impl SchedulingEngine {
         scored
     }
 
-    pub fn get_next_task(&self, tasks: Vec<Task>) -> Option<ScoredTask> {
-        let context = SchedulingContext::new();
-        self.rank_tasks(tasks, &context).into_iter().next()
+    pub fn get_next_task(
+        &self,
+        tasks: Vec<Task>,
+        context: &SchedulingContext,
+    ) -> Option<ScoredTask> {
+        self.rank_tasks(tasks, context).into_iter().next()
     }
 
     pub fn build_queue(&self, tasks: Vec<Task>, context: &SchedulingContext) -> TaskQueue {
@@ -144,20 +149,22 @@ mod tests {
     #[test]
     fn test_get_next_task() {
         let engine = SchedulingEngine::with_default_policies();
+        let context = SchedulingContext::default();
 
         let tasks = vec![
             Task::new("Low".to_string()).with_priority(Priority::Low),
             Task::new("High".to_string()).with_priority(Priority::High),
         ];
 
-        let next = engine.get_next_task(tasks).unwrap();
+        let next = engine.get_next_task(tasks, &context).unwrap();
         assert_eq!(next.task.title, "High");
     }
 
     #[test]
     fn test_empty_tasks() {
         let engine = SchedulingEngine::with_default_policies();
-        let next = engine.get_next_task(vec![]);
+        let context = SchedulingContext::default();
+        let next = engine.get_next_task(vec![], &context);
         assert!(next.is_none());
     }
 }

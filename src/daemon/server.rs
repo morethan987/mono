@@ -170,7 +170,8 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
 
         Request::GetCurrentTask => match state.storage.list_pending().await {
             Ok(tasks) => {
-                let current = state.scheduler.get_next_task(tasks).map(|st| st.task);
+                let context = state.build_context().await;
+                let current = state.scheduler.get_next_task(tasks, &context).map(|st| st.task);
                 Response::CurrentTask { task: current }
             }
             Err(e) => Response::error(format!("Failed to get current task: {}", e)),
@@ -556,9 +557,10 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
                         }
                     };
 
+                    let context = state.build_context().await;
                     let system_recommendation = state
                         .scheduler
-                        .get_next_task(pending_tasks.clone())
+                        .get_next_task(pending_tasks.clone(), &context)
                         .map(|st| st.task);
 
                     let matched_recommendation = system_recommendation
@@ -715,14 +717,17 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
 fn model_to_stats_data(
     model: &crate::learning::TaskTypeLearningModel,
 ) -> crate::protocol::TaskTypeStatsData {
+    let (mean, var) = model.predict_duration();
     crate::protocol::TaskTypeStatsData {
         task_type: model.task_type.name.clone(),
         total_scheduled: model.total_scheduled,
         total_completed: model.total_completed,
         total_postponed: model.total_postponed,
+        total_interrupted: model.total_interrupted,
         completion_rate: model.completion_rate(),
         best_time_slot: format!("{:?}", model.best_time_slot()),
-        avg_duration_minutes: model.avg_duration_minutes,
+        avg_duration_minutes: Some(mean),
+        duration_variance: Some(var),
     }
 }
 

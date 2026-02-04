@@ -20,6 +20,7 @@ pub struct TaskTypeLearningModel {
     pub total_completed: u32,
     pub total_postponed: u32,
     pub total_skipped: u32,
+    pub total_interrupted: u32,
     pub avg_duration_minutes: Option<f64>,
 }
 
@@ -34,6 +35,7 @@ impl TaskTypeLearningModel {
             total_completed: 0,
             total_postponed: 0,
             total_skipped: 0,
+            total_interrupted: 0,
             avg_duration_minutes: None,
         }
     }
@@ -247,6 +249,22 @@ impl LearningManager {
             .time_slot_bandit
             .update(arm, is_success(feedback));
         self.global_model.total_tasks += 1;
+    }
+
+    pub fn record_interruption(&mut self, task: &Task) {
+        let task_type = task.task_type();
+        let model = self
+            .models
+            .entry(task_type.name.clone())
+            .or_insert_with(|| TaskTypeLearningModel::new(task_type.clone()));
+        
+        model.total_interrupted += 1;
+        
+        // Also update bandit as a failure for this time slot
+        let now = Utc::now();
+        let arm = TimeSlotArm::from_hour(now.hour());
+        model.time_slot_bandit.update(arm, false);
+        self.global_model.time_slot_bandit.update(arm, false);
     }
 
     pub fn get_model(&self, task_type: &str) -> Option<&TaskTypeLearningModel> {

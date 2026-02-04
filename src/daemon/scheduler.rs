@@ -18,7 +18,6 @@ pub struct Scheduler {
     shutdown_rx: broadcast::Receiver<()>,
     settings_rx: watch::Receiver<Settings>,
     app_classifier: AppClassifier,
-    mismatch_counter: std::sync::atomic::AtomicU32,
 }
 
 impl Scheduler {
@@ -32,7 +31,6 @@ impl Scheduler {
             shutdown_rx,
             settings_rx,
             app_classifier: AppClassifier::new(),
-            mismatch_counter: std::sync::atomic::AtomicU32::new(0),
         }
     }
 
@@ -41,6 +39,7 @@ impl Scheduler {
         let mut current_interval_secs = settings.daemon.check_interval_secs;
         let mut tick_interval = tokio::time::interval(Duration::from_secs(current_interval_secs));
         let mut context_interval = tokio::time::interval(Duration::from_secs(15)); // Check context every 15s
+        let mut decay_interval = tokio::time::interval(Duration::from_secs(3600)); // Time decay every hour
 
         info!("Scheduler started with {}s interval", current_interval_secs);
 
@@ -51,6 +50,9 @@ impl Scheduler {
                 }
                 _ = context_interval.tick() => {
                     self.check_interruption().await;
+                }
+                _ = decay_interval.tick() => {
+                    self.apply_time_decay().await;
                 }
                 result = self.settings_rx.changed() => {
                     if result.is_ok() {
@@ -74,6 +76,16 @@ impl Scheduler {
         }
     }
 
+    async fn apply_time_decay(&self) {
+        info!("Applying time-based decay to learning models");
+        {
+            let mut lm = self.state.learning_manager.write().await;
+            // 0.999 per hour roughly equals 0.5 per 30 days
+            lm.apply_time_decay(0.999);
+        }
+        self.state.save_learning_model().await;
+    }
+
     async fn check_interruption(&self) {
         let in_progress_tasks = match self.state.storage.list_in_progress().await {
             Ok(tasks) => tasks,
@@ -81,7 +93,7 @@ impl Scheduler {
         };
 
         if in_progress_tasks.is_empty() {
-            self.mismatch_counter
+            self.state.mismatch_counter
                 .store(0, std::sync::atomic::Ordering::Relaxed);
             return;
         }
@@ -106,18 +118,23 @@ impl Scheduler {
             && context_type.name != "uncategorized"
             && context_type.name != "default"
         {
-            let count = self.mismatch_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            let count = self.state.mismatch_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
             if count >= 3 {
                 // Persistent mismatch (45 seconds) - record interruption
                 info!("Auto-detected interruption: doing {} while supposed to do {} (app: {})", 
                     context_type.name, task_type.name, app_id);
                 
-                // Record interruption in learning model (silent for now, just for learning)
-                // This would call LearningManager::record_interruption if implemented
-                self.mismatch_counter.store(0, std::sync::atomic::Ordering::Relaxed);
+                // Record interruption in learning model
+                {
+                    let mut lm = self.state.learning_manager.write().await;
+                    lm.record_interruption(current_task);
+                }
+                self.state.maybe_save_learning_model().await;
+                
+                self.state.mismatch_counter.store(0, std::sync::atomic::Ordering::Relaxed);
             }
         } else {
-            self.mismatch_counter.store(0, std::sync::atomic::Ordering::Relaxed);
+            self.state.mismatch_counter.store(0, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
@@ -180,7 +197,8 @@ impl Scheduler {
             }
         };
 
-        let next_task = match self.state.scheduler.get_next_task(pending_tasks) {
+        let context = self.state.build_context().await;
+        let next_task = match self.state.scheduler.get_next_task(pending_tasks, &context) {
             Some(scored) => scored.task,
             None => {
                 debug!("No next task from scheduler");

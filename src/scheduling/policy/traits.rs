@@ -11,6 +11,10 @@ pub struct SchedulingContext {
     pub work_hours_start: u32,
     /// User's preferred work hours end (0-23)
     pub work_hours_end: u32,
+    /// Duration of current work session in minutes
+    pub current_session_duration: u32,
+    /// Number of interruptions in current session
+    pub session_interruptions: u32,
 }
 
 impl Default for SchedulingContext {
@@ -19,6 +23,8 @@ impl Default for SchedulingContext {
             now: chrono::Utc::now(),
             work_hours_start: 9,
             work_hours_end: 18,
+            current_session_duration: 0,
+            session_interruptions: 0,
         }
     }
 }

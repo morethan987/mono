@@ -15,31 +15,40 @@ impl DynamicScheduler {
         &self,
         _completed_task: &Task,
         available_tasks: Vec<Task>,
+        context: &SchedulingContext,
     ) -> Option<ScoredTask> {
-        self.engine.get_next_task(available_tasks)
+        self.engine.get_next_task(available_tasks, context)
     }
 
     pub fn on_task_interrupted(
         &self,
         interrupted_task: &Task,
         available_tasks: Vec<Task>,
+        context: &SchedulingContext,
     ) -> Vec<ScoredTask> {
         let filtered: Vec<Task> = available_tasks
             .into_iter()
             .filter(|t| t.id != interrupted_task.id)
             .collect();
 
-        let context = SchedulingContext::new();
-        self.engine.rank_tasks(filtered, &context)
+        self.engine.rank_tasks(filtered, context)
     }
 
-    pub fn on_task_added(&self, _new_task: &Task, all_tasks: Vec<Task>) -> Vec<ScoredTask> {
-        let context = SchedulingContext::new();
-        self.engine.rank_tasks(all_tasks, &context)
+    pub fn on_task_added(
+        &self,
+        _new_task: &Task,
+        all_tasks: Vec<Task>,
+        context: &SchedulingContext,
+    ) -> Vec<ScoredTask> {
+        self.engine.rank_tasks(all_tasks, context)
     }
 
-    pub fn recommend_next(&self, available_tasks: Vec<Task>) -> Option<ScoredTask> {
-        self.engine.get_next_task(available_tasks)
+    pub fn recommend_next(
+        &self,
+        available_tasks: Vec<Task>,
+        context: &SchedulingContext,
+    ) -> Option<ScoredTask> {
+        self.engine.get_next_task(available_tasks, context)
     }
 }
 

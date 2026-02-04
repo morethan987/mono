@@ -15,7 +15,6 @@ mod manager;
 mod reward;
 
 pub use bandit::{TimeSlotArm, TimeSlotBandit};
-pub use duration::{BayesianDurationPredictor, DurationStats};
 pub use manager::{
     GlobalLearningModel, LearningManager, LearningManagerState, TaskTypeLearningModel,
 };

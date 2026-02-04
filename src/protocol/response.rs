@@ -104,9 +104,11 @@ pub struct TaskTypeStatsData {
     pub total_scheduled: u32,
     pub total_completed: u32,
     pub total_postponed: u32,
+    pub total_interrupted: u32,
     pub completion_rate: f64,
     pub best_time_slot: String,
     pub avg_duration_minutes: Option<f64>,
+    pub duration_variance: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

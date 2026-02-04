@@ -1025,11 +1025,13 @@ struct TaskTypeStatsRow {
     total_completed: String,
     #[tabled(rename = "已推迟")]
     total_postponed: String,
+    #[tabled(rename = "已中断")]
+    total_interrupted: String,
     #[tabled(rename = "完成率")]
     completion_rate: String,
     #[tabled(rename = "最佳时段")]
     best_time_slot: String,
-    #[tabled(rename = "平均时长")]
+    #[tabled(rename = "预测时长")]
     avg_duration: String,
 }
 
@@ -1045,6 +1047,17 @@ impl From<&protocol::TaskTypeStatsData> for TaskTypeStatsRow {
             completion_rate_str.red().to_string()
         };
 
+        let duration_str = if let Some(mean) = stats.avg_duration_minutes {
+            if let Some(var) = stats.duration_variance {
+                let std_dev = var.sqrt();
+                format!("{:.0}±{:.0}m", mean, std_dev)
+            } else {
+                format!("{:.0}m", mean)
+            }
+        } else {
+            "0m".to_string()
+        };
+
         Self {
             task_type: stats.task_type.clone().bold().to_string(),
             total_scheduled: stats.total_scheduled.to_string(),
@@ -1054,12 +1067,14 @@ impl From<&protocol::TaskTypeStatsData> for TaskTypeStatsRow {
             } else {
                 stats.total_postponed.to_string()
             },
+            total_interrupted: if stats.total_interrupted > 0 {
+                stats.total_interrupted.to_string().red().to_string()
+            } else {
+                stats.total_interrupted.to_string()
+            },
             completion_rate: completion_rate_colored,
             best_time_slot: format_best_time_slot(&stats.best_time_slot),
-            avg_duration: stats
-                .avg_duration_minutes
-                .map(|d| format!("{:.0}分钟", d))
-                .unwrap_or_else(|| "-".to_string()),
+            avg_duration: duration_str,
         }
     }
 }
