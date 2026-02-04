@@ -6,8 +6,8 @@ use tokio::sync::RwLock;
 use crate::config::{MonoPaths, Settings};
 use crate::learning::LearningManager;
 use crate::notification::LinuxNotificationBackend;
-use crate::scheduling::{SchedulingContext, SchedulingEngine};
 use crate::scheduling::policy::LearningPolicy;
+use crate::scheduling::{SchedulingContext, SchedulingEngine};
 use crate::storage::{SqliteStorage, TaskRepository};
 
 const SAVE_AFTER_N_UPDATES: u32 = 10;
@@ -76,7 +76,9 @@ impl DaemonState {
             }
         }
 
-        context.session_interruptions = self.mismatch_counter.load(std::sync::atomic::Ordering::Relaxed);
+        context.session_interruptions = self
+            .mismatch_counter
+            .load(std::sync::atomic::Ordering::Relaxed);
         context
     }
 

@@ -257,9 +257,9 @@ impl LearningManager {
             .models
             .entry(task_type.name.clone())
             .or_insert_with(|| TaskTypeLearningModel::new(task_type.clone()));
-        
+
         model.total_interrupted += 1;
-        
+
         // Also update bandit as a failure for this time slot
         let now = Utc::now();
         let arm = TimeSlotArm::from_hour(now.hour());

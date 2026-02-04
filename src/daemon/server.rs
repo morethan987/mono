@@ -171,7 +171,10 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
         Request::GetCurrentTask => match state.storage.list_pending().await {
             Ok(tasks) => {
                 let context = state.build_context().await;
-                let current = state.scheduler.get_next_task(tasks, &context).map(|st| st.task);
+                let current = state
+                    .scheduler
+                    .get_next_task(tasks, &context)
+                    .map(|st| st.task);
                 Response::CurrentTask { task: current }
             }
             Err(e) => Response::error(format!("Failed to get current task: {}", e)),
@@ -214,29 +217,40 @@ async fn handle_request(request: Request, state: &DaemonState) -> Response {
                                 "Updated learning model for completed task: {}",
                                 task.short_id()
                             );
-                            
+
                             // Check for parent auto-completion
                             if let Some(ref parent_id) = task.parent_task_id {
                                 if let Ok(children) = state.storage.get_children(parent_id).await {
-                                    let all_completed = children.iter().all(|t| t.status == TaskStatus::Completed);
+                                    let all_completed =
+                                        children.iter().all(|t| t.status == TaskStatus::Completed);
                                     if all_completed && !children.is_empty() {
                                         // Auto-complete parent
-                                        if let Ok(Some(mut parent)) = state.storage.get(parent_id).await {
+                                        if let Ok(Some(mut parent)) =
+                                            state.storage.get(parent_id).await
+                                        {
                                             if parent.status != TaskStatus::Completed {
                                                 parent.status = TaskStatus::Completed;
                                                 parent.completed_at = Some(Utc::now());
                                                 parent.updated_at = Utc::now();
-                                                if let Err(e) = state.storage.update(&parent).await {
-                                                    debug!("Failed to auto-complete parent {}: {}", parent.short_id(), e);
+                                                if let Err(e) = state.storage.update(&parent).await
+                                                {
+                                                    debug!(
+                                                        "Failed to auto-complete parent {}: {}",
+                                                        parent.short_id(),
+                                                        e
+                                                    );
                                                 } else {
-                                                    debug!("Auto-completed parent task: {}", parent.short_id());
+                                                    debug!(
+                                                        "Auto-completed parent task: {}",
+                                                        parent.short_id()
+                                                    );
                                                 }
                                             }
                                         }
                                     }
                                 }
                             }
-                            
+
                             Response::task(task)
                         }
                         Err(e) => Response::error(format!("Failed to complete task: {}", e)),

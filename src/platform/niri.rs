@@ -4,7 +4,7 @@
 
 use crate::error::{MonoError, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::env;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;

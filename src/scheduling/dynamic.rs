@@ -1,6 +1,6 @@
 use crate::models::Task;
-use crate::scheduling::policy::{SchedulingContext, ScoredTask};
 use crate::scheduling::SchedulingEngine;
+use crate::scheduling::policy::{SchedulingContext, ScoredTask};
 
 pub struct DynamicScheduler {
     engine: SchedulingEngine,

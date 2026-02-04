@@ -93,7 +93,8 @@ impl Scheduler {
         };
 
         if in_progress_tasks.is_empty() {
-            self.state.mismatch_counter
+            self.state
+                .mismatch_counter
                 .store(0, std::sync::atomic::Ordering::Relaxed);
             return;
         }
@@ -111,30 +112,43 @@ impl Scheduler {
             _ => return,
         };
 
-        let title = niri.get_active_window_title().unwrap_or_default().unwrap_or_default();
+        let title = niri
+            .get_active_window_title()
+            .unwrap_or_default()
+            .unwrap_or_default();
         let context_type = self.app_classifier.classify_with_title(&app_id, &title);
 
-        if context_type.name != task_type.name 
+        if context_type.name != task_type.name
             && context_type.name != "uncategorized"
             && context_type.name != "default"
         {
-            let count = self.state.mismatch_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            let count = self
+                .state
+                .mismatch_counter
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                + 1;
             if count >= 3 {
                 // Persistent mismatch (45 seconds) - record interruption
-                info!("Auto-detected interruption: doing {} while supposed to do {} (app: {})", 
-                    context_type.name, task_type.name, app_id);
-                
+                info!(
+                    "Auto-detected interruption: doing {} while supposed to do {} (app: {})",
+                    context_type.name, task_type.name, app_id
+                );
+
                 // Record interruption in learning model
                 {
                     let mut lm = self.state.learning_manager.write().await;
                     lm.record_interruption(current_task);
                 }
                 self.state.maybe_save_learning_model().await;
-                
-                self.state.mismatch_counter.store(0, std::sync::atomic::Ordering::Relaxed);
+
+                self.state
+                    .mismatch_counter
+                    .store(0, std::sync::atomic::Ordering::Relaxed);
             }
         } else {
-            self.state.mismatch_counter.store(0, std::sync::atomic::Ordering::Relaxed);
+            self.state
+                .mismatch_counter
+                .store(0, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
